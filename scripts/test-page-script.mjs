@@ -46,6 +46,8 @@ const checks = {
 	'capsule label 额度': inner.includes('dsh-capsule-label') && inner.includes("'额度'"),
 	'capsule chevron': inner.includes('dsh-capsule-chevron'),
 	'capsule renders worst status + joined summaries': inner.includes('renderCapsule') && inner.includes("parts.join(' · ')"),
+	'usage summary gets 用量 prefix': inner.includes("'用量 ' + s.summary"),
+	'hidden attribute enforced over display': inner.includes('#dsh-quota-panel [hidden]{display:none!important}'),
 	'STATE summary for deepseek': inner.includes("summary: '¥' + total.toFixed(2)"),
 	'STATE summary for usage': inner.includes("summary: high + '%'"),
 	'expand triggers refresh': inner.includes('if (open) refreshAll()'),
