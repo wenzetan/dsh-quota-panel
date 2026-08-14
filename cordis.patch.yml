@@ -2,12 +2,26 @@
 # Applied as a profile layer when this package is installed with
 # `dsh plugin --profile web add "github:owner/dsh-quota-panel"`.
 #
-# v0.4+: dual-face plugin. The host half (lib/index.js) injects
-# `connection` + `credentials` itself and owns the loopback RPC channel; the
-# browser half (lib/client.js) is discovered through the `dsh.client`
-# manifest in package.json and registers the `shell.overlay` widget. Settings
-# (provider visibility / refresh interval / warn thresholds) live in the
-# gear panel and persist to localStorage — no profile changes needed.
+# v0.5: the built-in catalog auto-discovers every provider whose standard
+# credential reference resolves (DEEPSEEK_API_KEY, OPENROUTER_API_KEY,
+# SILICONFLOW_API_KEY, MOONSHOT_API_KEY, MINIMAX_API_KEY, STEP_API_KEY /
+# STEPFUN_API_KEY, XAI_API_KEY, ZHIPU_API_KEY / GLM_API_KEY,
+# OPENCODE_GO_API_KEY) — no patch config needed for those. The keys below
+# are an explicit example: same-id entries replace catalog rows wholesale.
+# Set `auto: false` to list everything by hand, `hide: [id...]` to drop
+# single rows, and `catalog: {<id>: {...}}` for partial overrides.
+#
+# Providers that cannot be reached directly (e.g. from within mainland
+# China) can route through an HTTP proxy:
+#
+#   config:
+#     proxies:
+#       home: http://127.0.0.1:7890
+#     catalog:
+#       openrouter:
+#         proxy: home
+#
+# Explicit providers may set `proxy: home` per entry the same way.
 
 - insert:
     - id: quota-panel
