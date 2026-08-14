@@ -125,57 +125,77 @@ jobs:
           '
           # Seed one dummy credential so the catalog auto-discovery has
           # something to probe (specs only resolves refs — offline).
+          # chmod 600 is mandatory: credentials-local refuses owner-readable-
+          # beyond-owner files (default umask gives 644) and the whole plugin
+          # tree fails to load.
           printf 'ZAI_CODING_CN_API_KEY: ci-dummy-key\n' > "$DSH_HOME/.credentials.yaml"
+          chmod 600 "$DSH_HOME/.credentials.yaml"
       - name: dsh web boots and serves the plugin
         run: |
           set -euo pipefail
           export DSH_HOME="$RUNNER_TEMP/dsh-home"
           LOG="$RUNNER_TEMP/dsh-web.log"
+          PROBE_BODY="$RUNNER_TEMP/probe-body"
           dsh web > "$LOG" 2>&1 &
           WEB_PID=$!
           trap 'kill "$WEB_PID" 2>/dev/null || true' EXIT
-          code=""
-          for _ in $(seq 1 120); do
-            if ! kill -0 "$WEB_PID" 2>/dev/null; then
-              echo "::error::dsh web exited during startup"
-              cat "$LOG"
-              exit 1
-            fi
-            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)"
-            [ "$code" = "200" ] && break
-            sleep 1
-          done
-          if [ "$code" != "200" ]; then
-            echo "::error::dsh web did not become ready on :3080"
+
+          # wait_for <expected-code> <method> <url> [curl args...]
+          # Every probe is a retried wait, never a one-shot check: on a cold
+          # boot the SPA answers before the static plugin routes settle, and
+          # an early probe can even take a connection reset (curl exit 56 →
+          # code 000). curl failures are absorbed (|| true); only the final
+          # HTTP code decides. Sets LAST_CODE and returns non-zero on timeout.
+          wait_for() {
+            expected="$1"; shift
+            method="$1"; shift
+            url="$1"; shift
+            LAST_CODE="000"
+            for _ in $(seq 1 90); do
+              if ! kill -0 "$WEB_PID" 2>/dev/null; then
+                echo "::error::dsh web exited during startup"
+                cat "$LOG"
+                exit 1
+              fi
+              LAST_CODE="$(curl -s -o "$PROBE_BODY" -w '%{http_code}' -X "$method" "$url" "$@" 2>/dev/null || true)"
+              [ "$LAST_CODE" = "$expected" ] && return 0
+              sleep 1
+            done
+            return 1
+          }
+
+          wait_for 200 GET http://127.0.0.1:3080/ || {
+            echo "::error::dsh web did not become ready on :3080 (last HTTP $LAST_CODE)"
             cat "$LOG"
             exit 1
-          fi
+          }
           echo "web ready on :3080"
+
           # The plugin's browser half is served for the module loader.
-          client="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3080/plugins/dsh-quota-panel/client.js")"
-          if [ "$client" != "200" ]; then
-            echo "::error::client bundle not served (HTTP $client)"
+          wait_for 200 GET http://127.0.0.1:3080/plugins/dsh-quota-panel/client.js || {
+            echo "::error::client bundle not served (HTTP $LAST_CODE)"
             cat "$LOG"
             exit 1
-          fi
-          # The plugin's RPC channel: 405 is the SPA fallback rejecting a
-          # POST, i.e. the channel did not register. Any other answer with
-          # ok:true proves /dsh-quota-panel is live.
-          BODY="$RUNNER_TEMP/specs.json"
-          rpc="$(curl -s -o "$BODY" -w '%{http_code}' -X POST \
-            http://127.0.0.1:3080/dsh-quota-panel/specs \
+          }
+          client="$LAST_CODE"
+
+          # The plugin's RPC channel. 405 = the SPA fallback rejecting the
+          # POST, i.e. the channel did not register; retried until 200 so a
+          # late registration still passes, then asserted functionally below.
+          wait_for 200 POST http://127.0.0.1:3080/dsh-quota-panel/specs \
             -H 'content-type: application/json' \
-            -d '{"type":"client-request","rpcId":"ci-boot","method":"specs","payload":null}')"
-          if [ "$rpc" = "405" ]; then
-            echo "::error::RPC channel /dsh-quota-panel missing (405) — the channel did not register"
+            -d '{"type":"client-request","rpcId":"ci-boot","method":"specs","payload":null}' || {
+            if [ "$LAST_CODE" = "405" ]; then
+              echo "::error::RPC channel /dsh-quota-panel missing (405) — the channel did not register"
+            else
+              echo "::error::specs RPC answered HTTP $LAST_CODE"
+            fi
             cat "$LOG"
+            cat "$PROBE_BODY" 2>/dev/null || true
             exit 1
-          fi
-          if [ "$rpc" != "200" ]; then
-            echo "::error::specs RPC answered HTTP $rpc"
-            cat "$LOG"; cat "$BODY" 2>/dev/null || true
-            exit 1
-          fi
+          }
+          rpc="$LAST_CODE"
+          BODY="$PROBE_BODY"
           # Functional assertions on the real specs response:
           #   * ok:true — the handler answered, not a fallback page
           #   * "deepseek" — the explicit row from cordis.patch.yml
