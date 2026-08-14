@@ -83,19 +83,19 @@ const PAGE = (title, darkAttr, tokens) => `<!doctype html>
 <title>${title}</title>
 <style>
   html, body { margin: 0; height: 100%; }
-  body { background: #ffffff; font-family: var(--dsw-font-family, system-ui, sans-serif); color: var(--dsw-alias-label-primary, #1b1b1c); }
+  body { background: var(--dsw-alias-bg-layer-2, #ffffff); font-family: var(--dsw-font-family, system-ui, sans-serif); color: var(--dsw-alias-label-primary, #1b1b1c); }
   ${tokens}
   .chrome { display: flex; height: 100vh; }
-  .sidebar { width: 220px; background: #ffffff; border-right: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06)); padding: 12px; }
+  .sidebar { width: 220px; background: var(--dsw-alias-bg-layer-2, #ffffff); border-right: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06)); padding: 12px; }
   .brand { font-size: 13px; font-weight: 700; margin-bottom: 14px; }
   .nav { font-size: 12px; line-height: 2.2; color: var(--dsw-alias-label-secondary, #61666b); }
   .main { flex: 1; display: flex; flex-direction: column; }
-  .chat { flex: 1; padding: 24px; overflow: hidden; background: #ffffff; }
+  .chat { flex: 1; padding: 24px; overflow: hidden; background: var(--dsw-alias-bg-layer-2, #ffffff); }
   .msg { max-width: 640px; margin: 0 auto 14px; font-size: 13px; line-height: 1.6; }
   .msg .who { font-weight: 700; color: var(--dsw-static-deepseek-500, #4176e6); margin-bottom: 4px; }
   .msg p { margin: 4px 0; color: var(--dsw-alias-label-secondary, #61666b); }
-  .composer { border-top: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06)); padding: 12px 24px; background: #ffffff; }
-  .box { max-width: 640px; margin: 0 auto; background: #ffffff; border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1)); border-radius: 10px; padding: 10px 14px; color: var(--dsw-alias-label-secondary, #61666b); font-size: 13px; }
+  .composer { border-top: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06)); padding: 12px 24px; background: var(--dsw-alias-bg-layer-2, #ffffff); }
+  .box { max-width: 640px; margin: 0 auto; background: var(--dsw-alias-bg-layer-2, #ffffff); border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1)); border-radius: 10px; padding: 10px 14px; color: var(--dsw-alias-label-secondary, #61666b); font-size: 13px; }
 </style>
 </head>
 <body${darkAttr}>
