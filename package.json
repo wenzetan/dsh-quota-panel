@@ -1,22 +1,35 @@
 {
   "name": "dsh-quota-panel",
-  "description": "Provider quota/balance widget for the dsh web surface: collapsed glanceable capsule expanding into a Harness-native card, with server-side credential proxies for DeepSeek balance and OpenCode Zen Go usage windows.",
-  "version": "0.3.0",
+  "description": "Provider quota/balance widget for the dsh web surface: collapsed glanceable capsule expanding into a Harness-native card with a settings panel (provider visibility / refresh interval / warn thresholds), fed by a loopback Connection RPC channel whose host half proxies each provider with credentials that never reach the browser.",
+  "version": "0.4.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
     "lib/index.d.ts",
+    "lib/client.js",
+    "lib/vendor/schemastery.mjs",
+    "lib/vendor/cosmokit.js",
     "cordis.patch.yml"
   ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-cordis-client-runner"
+      ],
+      "immediately": true
     }
   },
   "keywords": [
@@ -31,6 +44,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brittanistrehlowll-oss/dsh-quota-panel.git"
+    "url": "git+https://github.com/wenzetan/dsh-quota-panel.git"
   }
 }

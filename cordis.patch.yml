@@ -1,13 +1,17 @@
 # dsh-quota-panel bundle patch: mounts the quota panel into a dsh profile.
 # Applied as a profile layer when this package is installed with
 # `dsh plugin --profile web add "github:owner/dsh-quota-panel"`.
+#
+# v0.4+: dual-face plugin. The host half (lib/index.js) injects
+# `connection` + `credentials` itself and owns the loopback RPC channel; the
+# browser half (lib/client.js) is discovered through the `dsh.client`
+# manifest in package.json and registers the `shell.overlay` widget. Settings
+# (provider visibility / refresh interval / warn thresholds) live in the
+# gear panel and persist to localStorage — no profile changes needed.
 
 - insert:
     - id: quota-panel
       name: 'dsh-quota-panel'
-      inject:
-        - webServer
-        - credentials
       config:
         refreshMs: 60000
         providers:
