@@ -2,19 +2,29 @@
 
 [English](README.md) | 中文
 
-**dsh-quota-panel** 是 DeepSeek Harness（DSH）网页端的**提供方额度/余额角标面板**插件。
+**dsh-quota-panel** 是 DeepSeek Harness（DSH）网页端的**提供方额度/余额状态卡片**插件。
 
-一个零依赖的宿主端插件：为每个配置的提供方注册一条服务端代理路由
-`/api/quota/<id>` —— API Key 通过凭据系统解析，**绝不进入浏览器** —— 然后在
-页面注入右下角小面板，拉取路由数据并逐行渲染。数据每 60 秒自动刷新，点击面板
-立即刷新；悬停可见明细（窗口、重置倒计时、赠送/充值余额），颜色提示低余额或
-高用量。
+零依赖宿主端插件：为每个配置的提供方注册一条服务端代理路由
+`/api/quota/<id>` —— API Key 通过凭据系统在服务端解析，**绝不进入浏览器** ——
+然后在页面注入一个右下角的 Harness 原生风格悬浮卡片，按提供方逐行渲染：
+状态点、名称、主数值、次级信息，用量型提供方还有进度条。页面隐藏时自动暂停
+刷新；右上角刷新按钮在手动刷新时旋转，重复点击不会并发请求。
+
+卡片完全使用 Harness 设计 Token（`--dsw-alias-*`、`--dsw-static-*`、
+`--dsw-shadow-*`、`--dsw-font-*`）驱动，token 缺失时有合理的 fallback，
+因此自动跟随产品主题（浅色/深色），不携带自己的配色。
 
 ## 效果图
 
-![面板特写](docs/panel.png)
+浅色主题：
 
-完整页面效果（右下角）：
+![面板（浅色）](docs/panel.png)
+
+深色主题：
+
+![面板（深色）](docs/panel-dark.png)
+
+完整页面（浅色）：
 
 ![完整页面](docs/screenshot.png)
 
@@ -33,8 +43,8 @@ dsh plugin --profile web add "github:brittanistrehlowll-oss/dsh-quota-panel"
 
 | format | 接口返回形态 | 行显示 |
 |---|---|---|
-| `deepseek-balance` | `{ "balance_infos": [{ "currency", "total_balance", "granted_balance", "topped_up_balance" }] }` | `¥15.63`，低于 `lowBalance` 变黄 |
-| `opencode-usage` | `{ "usage": { "rolling"\|"weekly"\|"monthly": { "percent", "resetsAt" } } }` | `滚 4% · 周 43% · 月 21%`，达 `warnPercent` 变黄、`errorPercent` 变红 |
+| `deepseek-balance` | `{ "balance_infos": [{ "currency", "total_balance", "granted_balance", "topped_up_balance" }] }` | `¥58.36` + 余额充足/正常/紧张/建议充值 |
+| `opencode-usage` | `{ "usage": { "rolling"\|"weekly"\|"monthly": { "percent", "resetsAt" } } }` | `五 10% · 周 45% · 月 22%` + 进度条 + 当前最高占用 |
 
 在 profile 的 `cordis.patch.yml` 中覆盖默认配置：
 
@@ -44,13 +54,13 @@ dsh plugin --profile web add "github:brittanistrehlowll-oss/dsh-quota-panel"
     refreshMs: 30000
     providers:
       - id: deepseek
-        label: DS 余额
+        label: DeepSeek
         credential: DEEPSEEK_API_KEY
         endpoint: https://api.deepseek.com/user/balance
         format: deepseek-balance
-        lowBalance: 5
+        balanceTiers: { critical: 10, warn: 20, healthy: 50 }
       - id: opencode-go
-        label: OC Go
+        label: OpenCode Go
         credential: OPENCODE_GO_API_KEY
         endpoint: https://opencode.ai/zen/go/v1/usage
         format: opencode-usage
@@ -64,29 +74,56 @@ dsh plugin --profile web add "github:brittanistrehlowll-oss/dsh-quota-panel"
 | 字段 | 含义 | 默认值 |
 |---|---|---|
 | `id` | 路由 id（`/api/quota/<id>`），`^[a-z0-9-]+$` | 必填 |
-| `label` | 行标签 | 必填 |
+| `label` | 卡片上的提供方名称 | 必填 |
 | `credential` | 凭据引用（`$DSH_HOME/.credentials.yaml` 或环境变量） | 必填 |
 | `endpoint` | 额度 JSON 接口，GET + `Authorization: Bearer <key>` | 必填 |
 | `format` | 行渲染器 | `deepseek-balance` |
+| `balanceTiers` | （deepseek-balance）`{critical, warn, healthy}` 分级阈值 | `{10, 20, 50}` |
+| `lowBalance` | 旧版别名，等价于 `balanceTiers.warn` | — |
 | `windowLabels` | （opencode-usage）三个窗口的标签 | `{滚, 周, 月}` |
-| `warnPercent` / `errorPercent` | （opencode-usage）颜色阈值 | 70 / 90 |
-| `lowBalance` | （deepseek-balance）低于此总额变黄 | 5 |
-| `refreshMs` | 面板自动刷新间隔 | 60000 |
+| `warnPercent` / `errorPercent` | （opencode-usage）阈值 | 70 / 90 |
+| `refreshMs` | 自动刷新间隔 | 60000 |
+
+### DeepSeek 余额分级
+
+默认 `balanceTiers {critical: 10, warn: 20, healthy: 50}`：
+
+| 余额 | 状态 | 次级信息 |
+|---|---|---|
+| `<= 10` | error（红点 + 红数值） | 建议充值 |
+| `10 < x <= 20` | warn（琥珀色） | 余额紧张 |
+| `20 < x <= 50` | ok | 余额正常 |
+| `> 50` | ok | 余额充足 |
+
+### OpenCode 用量状态
+
+`high = max(滚动, 每周, 每月)`：
+
+| 用量 | 状态 |
+|---|---|
+| `< warnPercent` | ok（绿点，DeepSeek 蓝进度条） |
+| `>= warnPercent` | warn（琥珀点 + 进度条） |
+| `>= errorPercent` | error（红点 + 进度条） |
 
 ## 安全
 
 - API Key 仅由服务端通过 `ctx.credentials` 解析，只用于服务端到提供方的请求；
   浏览器只访问 `/api/quota/<id>`。
-- 注入的面板脚本不含任何密钥，不注入 HTML（纯文本节点），行数据经同一 JSON
-  转义路径处理。
+- 注入的卡片只使用 `createElement`/`textContent` 构建 DOM，API 返回值绝不经过
+  `innerHTML`；技术错误（401、超时、凭据缺失）只写入 `title` 悬停提示，不进卡片
+  正文。
 
 ## 本地开发
 
 ```sh
-# 生成/刷新演示页 docs/demo.html（内含模拟数据）
+# 重新生成演示页 docs/demo.html + docs/demo-dark.html
 node scripts/gen-demo.mjs
-# 无头截图（通过 Chrome DevTools Protocol）
-node scripts/shoot.mjs
+# 通过 Chrome DevTools Protocol 无头截图
+node scripts/shoot.mjs both
+# 验证演示页渲染出的 DOM
+node scripts/verify.mjs [dark]
+# 注入脚本的语法与内容检查
+node scripts/test-page-script.mjs
 ```
 
 ## License

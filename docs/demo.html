@@ -2,21 +2,52 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<title>dsh-quota-panel demo</title>
+<title>dsh-quota-panel demo (light)</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #14161c; }
-  body { font-family: system-ui, sans-serif; color: #c9d1d9; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--dsw-alias-bg-layer-2, #fff); font-family: var(--dsw-font-family, system-ui, sans-serif); color: var(--dsw-alias-label-primary, #1b1b1c); }
+  body {
+  --dsw-alias-bg-layer-2: #ffffff;
+  --dsw-alias-bg-overlay: #ebeef2;
+  --dsw-alias-border-l1: rgba(0,0,0,.06);
+  --dsw-alias-border-l2: rgba(0,0,0,.10);
+  --dsw-alias-label-primary: #1b1b1c;
+  --dsw-alias-label-secondary: #61666b;
+  --dsw-alias-interactive-bg-hover: rgba(0,0,0,.05);
+  --dsw-static-green-500: #22c55e;
+  --dsw-static-amber-500: #f59e0b;
+  --dsw-static-red-500: #ef4444;
+  --dsw-static-deepseek-500: #4176e6;
+  --dsw-static-neutral-bluish-400: #adb2b8;
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0,0,0,.2), 0 0 4px 0 rgba(0,0,0,.02), 0 12px 32px 0 rgba(0,0,0,.08);
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+body[data-ds-dark-theme] {
+  --dsw-alias-bg-layer-2: #2c2c2e;
+  --dsw-alias-bg-overlay: #434346;
+  --dsw-alias-border-l1: rgba(255,255,255,.06);
+  --dsw-alias-border-l2: rgba(255,255,255,.12);
+  --dsw-alias-label-primary: #f2f2f2;
+  --dsw-alias-label-secondary: #c6c8cc;
+  --dsw-alias-interactive-bg-hover: rgba(255,255,255,.08);
+  --dsw-static-green-500: #22c55e;
+  --dsw-static-amber-500: #f59e0b;
+  --dsw-static-red-500: #f87171;
+  --dsw-static-deepseek-500: #4d82f0;
+  --dsw-static-neutral-bluish-400: #9aa0a8;
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0,0,0,.4), 0 0 4px 0 rgba(0,0,0,.1), 0 12px 32px 0 rgba(0,0,0,.35);
+}
   .chrome { display: flex; height: 100vh; }
-  .sidebar { width: 220px; background: #101218; border-right: 1px solid #23262e; padding: 12px; }
-  .brand { font-size: 13px; font-weight: 700; color: #e6edf3; margin-bottom: 14px; }
-  .nav { font-size: 12px; line-height: 2.2; color: #8b949e; }
+  .sidebar { width: 220px; background: var(--dsw-alias-bg-layer-2, #fafafa); border-right: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06)); padding: 12px; }
+  .brand { font-size: 13px; font-weight: 700; margin-bottom: 14px; }
+  .nav { font-size: 12px; line-height: 2.2; color: var(--dsw-alias-label-secondary, #61666b); }
   .main { flex: 1; display: flex; flex-direction: column; }
   .chat { flex: 1; padding: 24px; overflow: hidden; }
   .msg { max-width: 640px; margin: 0 auto 14px; font-size: 13px; line-height: 1.6; }
-  .msg .who { font-weight: 700; color: #7ee787; margin-bottom: 4px; }
-  .msg p { margin: 4px 0; color: #b8c0c8; }
-  .composer { border-top: 1px solid #23262e; padding: 12px 24px; }
-  .box { max-width: 640px; margin: 0 auto; background: #1a1d25; border: 1px solid #2b2f3a; border-radius: 10px; padding: 10px 14px; color: #7d8590; font-size: 13px; }
+  .msg .who { font-weight: 700; color: var(--dsw-static-deepseek-500, #4176e6); margin-bottom: 4px; }
+  .msg p { margin: 4px 0; color: var(--dsw-alias-label-secondary, #61666b); }
+  .composer { border-top: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06)); padding: 12px 24px; }
+  .box { max-width: 640px; margin: 0 auto; background: var(--dsw-alias-bg-layer-2, #fff); border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1)); border-radius: 10px; padding: 10px 14px; color: var(--dsw-alias-label-secondary, #61666b); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -29,7 +60,7 @@
     <div class="chat">
       <div class="msg"><div class="who">助手</div><p>你好！我是运行在 DeepSeek Harness 里的编程智能体。</p></div>
       <div class="msg"><div class="who">用户</div><p>帮我看看账户余额和用量。</p></div>
-      <div class="msg"><div class="who">助手</div><p>好的，右下角面板实时显示各提供方的配额情况。</p></div>
+      <div class="msg"><div class="who">助手</div><p>好的，右下角卡片实时显示各提供方的配额情况。</p></div>
     </div>
     <div class="composer"><div class="box">输入消息…</div></div>
   </div>
@@ -38,12 +69,12 @@
 window.fetch = function (url) {
   var data;
   if (String(url).indexOf('deepseek') >= 0) {
-    data = { is_available: true, balance_infos: [{ currency: 'CNY', total_balance: '15.63', granted_balance: '0.00', topped_up_balance: '15.63' }] };
+    data = { is_available: true, balance_infos: [{ currency: 'CNY', total_balance: '58.36', granted_balance: '0.00', topped_up_balance: '58.36' }] };
   } else {
     data = { usage: {
-      rolling: { status: 'ok', percent: 12, resetsAt: new Date(Date.now() + 4 * 3600e3).toISOString() },
-      weekly:  { status: 'ok', percent: 43, resetsAt: new Date(Date.now() + 2 * 86400e3).toISOString() },
-      monthly: { status: 'ok', percent: 21, resetsAt: new Date(Date.now() + 27 * 86400e3).toISOString() }
+      rolling: { status: 'ok', percent: 10, resetsAt: new Date(Date.now() + 4 * 3600e3).toISOString() },
+      weekly:  { status: 'ok', percent: 45, resetsAt: new Date(Date.now() + 2 * 86400e3).toISOString() },
+      monthly: { status: 'ok', percent: 22, resetsAt: new Date(Date.now() + 27 * 86400e3).toISOString() }
     } };
   }
   return Promise.resolve({ json: function () { return Promise.resolve(data); } });
@@ -51,8 +82,11 @@ window.fetch = function (url) {
 </script>
 <script>(function () {
   var AUTO_MS = 60000;
-  var ROWS = [{"id":"deepseek","label":"DS 余额","format":"deepseek-balance","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"lowBalance":5},{"id":"opencode-go","label":"OC Go","format":"opencode-usage","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"lowBalance":5}];
+  var ROWS = [{"id":"deepseek","label":"DeepSeek","format":"deepseek-balance","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}},{"id":"opencode-go","label":"OpenCode Go","format":"opencode-usage","windowLabels":{"rolling":"五","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}}];
   var panelId = 'dsh-quota-panel';
+  var VIEWS = {};      // spec.id -> view object
+  var refreshBtn = null;
+  var refreshing = false;
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -63,7 +97,7 @@ window.fetch = function (url) {
 
   function fmtReset(iso) {
     var ms = new Date(iso).getTime() - Date.now();
-    if (!isFinite(ms) || ms <= 0) return '\u5373\u5C06\u91CD\u7F6E';
+    if (!isFinite(ms) || ms <= 0) return '即将重置';
     var s = Math.floor(ms / 1000);
     var d = Math.floor(s / 86400); s -= d * 86400;
     var h = Math.floor(s / 3600); s -= h * 3600;
@@ -71,84 +105,223 @@ window.fetch = function (url) {
     if (m === 60) { h += 1; m = 0; }
     if (h === 24) { d += 1; h = 0; }
     var parts = [];
-    if (d) parts.push(d + '\u5929');
-    if (h) parts.push(h + '\u5C0F\u65F6');
-    if (m) parts.push(m + '\u5206');
-    return parts.length ? parts.join('') : '\u5373\u5C06\u91CD\u7F6E';
+    if (d) parts.push(d + '天');
+    if (h) parts.push(h + '小时');
+    if (m) parts.push(m + '分');
+    return parts.length ? parts.join('') : '即将重置';
   }
 
-  function renderDeepSeek(row, spec, data) {
+  function setState(view, state) {
+    view.root.classList.remove('state-loading', 'state-ok', 'state-warn', 'state-error');
+    view.root.classList.add('state-' + state);
+  }
+
+  function createProviderView(spec) {
+    var root = el('div', 'dsh-provider state-loading');
+    var main = el('div', 'dsh-provider-main');
+    var dot = el('span', 'dsh-status-dot');
+    var body = el('div', 'dsh-provider-body');
+    var head = el('div', 'dsh-provider-head');
+    var nameEl = el('span', 'dsh-provider-name', spec.label);
+    var value = null, sub = null, usage = null, track = null, progress = null, caption = null;
+
+    head.appendChild(nameEl);
+    if (spec.format === 'deepseek-balance') {
+      value = el('span', 'dsh-provider-value', '—');
+      head.appendChild(value);
+      sub = el('div', 'dsh-provider-sub', '正在更新…');
+    } else {
+      usage = el('div', 'dsh-usage-values', '正在更新…');
+      track = el('div', 'dsh-progress');
+      progress = el('div', 'dsh-progress-fill');
+      track.appendChild(progress);
+      caption = el('div', 'dsh-usage-caption', '');
+    }
+    body.appendChild(head);
+    if (sub) body.appendChild(sub);
+    if (usage) body.appendChild(usage);
+    if (progress) body.appendChild(track);
+    if (caption) body.appendChild(caption);
+
+    main.appendChild(dot);
+    main.appendChild(body);
+    root.appendChild(main);
+    return { root, dot, name: nameEl, value, sub, usage, progress, caption };
+  }
+
+  function renderDeepSeek(view, spec, data) {
     var info = data && data.balance_infos && data.balance_infos[0];
     if (!data || data.error || !info) {
-      row.textContent = spec.label + ': \uFF1F';
-      row.title = data && data.error ? String(data.error) : 'no balance info';
-      row.classList.add('err');
+      setState(view, 'error');
+      view.value.textContent = '—';
+      view.sub.textContent = '暂时无法获取余额';
+      view.root.title = data && data.error ? String(data.error) : 'no balance info';
       return;
     }
     var total = Number(info.total_balance);
-    row.textContent = spec.label + ': \u00A5' + total.toFixed(2);
-    row.title = 'currency: ' + info.currency + ' | granted: \u00A5' + info.granted_balance + ' | topped-up: \u00A5' + info.topped_up_balance;
-    row.classList.toggle('warn', total < spec.lowBalance);
-  }
-
-  function renderUsage(row, spec, data) {
-    var u = data && data.usage;
-    if (!data || data.error || !u || !u.rolling || !u.weekly || !u.monthly) {
-      row.textContent = spec.label + ': \uFF1F';
-      row.title = data && data.error ? String(data.error) : 'usage unavailable';
-      row.classList.add('err');
+    if (!Number.isFinite(total)) {
+      setState(view, 'error');
+      view.value.textContent = '—';
+      view.sub.textContent = '余额数据异常';
+      view.root.title = 'non-numeric total_balance';
       return;
     }
-    var l = spec.windowLabels;
+    view.value.textContent = '¥' + total.toFixed(2);
+    var tiers = spec.balanceTiers || { critical: 10, warn: 20, healthy: 50 };
+    if (total <= tiers.critical) {
+      setState(view, 'error');
+      view.sub.textContent = '建议充值';
+    } else if (total <= tiers.warn) {
+      setState(view, 'warn');
+      view.sub.textContent = '余额紧张';
+    } else if (total <= tiers.healthy) {
+      setState(view, 'ok');
+      view.sub.textContent = '余额正常';
+    } else {
+      setState(view, 'ok');
+      view.sub.textContent = '余额充足';
+    }
+    view.root.title = 'currency: ' + info.currency + '\ngranted: ¥' + info.granted_balance + '\ntopped-up: ¥' + info.topped_up_balance;
+  }
+
+  function renderUsage(view, spec, data) {
+    var u = data && data.usage;
+    if (!data || data.error || !u || !u.rolling || !u.weekly || !u.monthly) {
+      setState(view, 'error');
+      view.usage.textContent = '暂时无法获取用量';
+      view.progress.style.width = '0%';
+      view.caption.textContent = '';
+      view.root.title = data && data.error ? String(data.error) : 'usage unavailable';
+      return;
+    }
     var r = u.rolling, w = u.weekly, m = u.monthly;
-    row.textContent = spec.label + ': ' + l.rolling + ' ' + r.percent + '% \u00B7 ' + l.weekly + ' ' + w.percent + '% \u00B7 ' + l.monthly + ' ' + m.percent + '%';
-    row.title = 'rolling: ' + r.percent + '% (\u91CD\u7F6E\u4E8E ' + fmtReset(r.resetsAt) + ')\nweekly: ' + w.percent + '% (\u91CD\u7F6E\u4E8E ' + fmtReset(w.resetsAt) + ')\nmonthly: ' + m.percent + '% (\u91CD\u7F6E\u4E8E ' + fmtReset(m.resetsAt) + ')';
-    var high = Math.max(r.percent || 0, w.percent || 0, m.percent || 0);
-    row.classList.toggle('warn', high >= spec.warnPercent && high < spec.errorPercent);
-    row.classList.toggle('err', high >= spec.errorPercent);
+    var rp = Number(r.percent) || 0;
+    var wp = Number(w.percent) || 0;
+    var mp = Number(m.percent) || 0;
+    var high = Math.max(rp, wp, mp);
+    var labels = spec.windowLabels || { rolling: '滚', weekly: '周', monthly: '月' };
+
+    view.usage.textContent = labels.rolling + ' ' + rp + '%' + ' · ' + labels.weekly + ' ' + wp + '%' + ' · ' + labels.monthly + ' ' + mp + '%';
+    view.progress.style.width = Math.min(Math.max(high, 0), 100) + '%';
+    view.caption.textContent = '当前最高占用 ' + high + '%';
+
+    if (high >= spec.errorPercent) setState(view, 'error');
+    else if (high >= spec.warnPercent) setState(view, 'warn');
+    else setState(view, 'ok');
+
+    view.root.title = 'rolling: ' + rp + '%（重置于 ' + fmtReset(r.resetsAt) + '）' + '\nweekly: ' + wp + '%（重置于 ' + fmtReset(w.resetsAt) + '）' + '\nmonthly: ' + mp + '%（重置于 ' + fmtReset(m.resetsAt) + '）';
   }
 
-  function renderRow(spec, row) {
-    fetch('/api/quota/' + spec.id, { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (spec.format === 'deepseek-balance') renderDeepSeek(row, spec, data);
-        else renderUsage(row, spec, data);
-      })
-      .catch(function (err) {
-        row.textContent = spec.label + ': \u2717';
-        row.title = String(err);
-        row.classList.add('err');
-      });
+  function renderProviderError(view, spec, error) {
+    setState(view, 'error');
+    if (spec.format === 'deepseek-balance') {
+      view.value.textContent = '—';
+      view.sub.textContent = '暂时无法获取余额';
+    } else {
+      view.usage.textContent = '暂时无法获取用量';
+      view.progress.style.width = '0%';
+      view.caption.textContent = '';
+    }
+    view.root.title = String(error && error.message ? error.message : error);
   }
 
-  function refresh() {
+  function injectStyles() {
+    var css = [
+      '#dsh-quota-panel{position:fixed;right:18px;bottom:18px;z-index:900;width:300px;max-width:calc(100vw - 36px);padding:14px 16px 15px;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));border-radius:16px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#1b1b1c);font-family:var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif);font-size:13px;line-height:1.45;box-shadow:var(--dsw-shadow-lv3,0 8px 26px rgba(15,17,21,.1),0 2px 6px rgba(15,17,21,.06));box-sizing:border-box}',
+      '#dsh-quota-panel .dsh-quota-header{display:flex;align-items:center;justify-content:space-between;min-height:24px;margin-bottom:13px}',
+      '#dsh-quota-panel .dsh-quota-title{color:var(--dsw-alias-label-primary,#1b1b1c);font-size:14px;font-weight:600;line-height:20px}',
+      '#dsh-quota-panel .dsh-quota-refresh{display:inline-grid;place-items:center;width:26px;height:26px;margin:-3px -4px -3px 0;padding:0;border:0;border-radius:8px;color:var(--dsw-alias-label-secondary,#61666b);background:transparent;font-size:16px;line-height:1;cursor:pointer;transition:background-color 120ms ease,color 120ms ease}',
+      '#dsh-quota-panel .dsh-quota-refresh:hover{color:var(--dsw-alias-label-primary,#1b1b1c);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
+      '#dsh-quota-panel .dsh-quota-refresh:disabled{cursor:default;opacity:.55}',
+      '#dsh-quota-panel .dsh-quota-refresh.is-loading{animation:dsh-quota-spin .7s linear infinite}',
+      '@keyframes dsh-quota-spin{to{transform:rotate(360deg)}}',
+      '#dsh-quota-panel .dsh-provider{width:100%}',
+      '#dsh-quota-panel .dsh-provider-main{display:flex;align-items:flex-start;gap:10px}',
+      '#dsh-quota-panel .dsh-status-dot{flex:none;width:8px;height:8px;margin-top:6px;border-radius:50%;background:var(--dsw-static-green-500,#22c55e)}',
+      '#dsh-quota-panel .state-loading .dsh-status-dot{background:var(--dsw-static-neutral-bluish-400,#adb2b8)}',
+      '#dsh-quota-panel .state-warn .dsh-status-dot{background:var(--dsw-static-amber-500,#f59e0b)}',
+      '#dsh-quota-panel .state-error .dsh-status-dot{background:var(--dsw-static-red-500,#ef4444)}',
+      '#dsh-quota-panel .dsh-provider-body{flex:1;min-width:0}',
+      '#dsh-quota-panel .dsh-provider-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}',
+      '#dsh-quota-panel .dsh-provider-name{overflow:hidden;color:var(--dsw-alias-label-primary,#1b1b1c);font-size:13px;font-weight:500;text-overflow:ellipsis;white-space:nowrap}',
+      '#dsh-quota-panel .dsh-provider-value{flex:none;color:var(--dsw-alias-label-primary,#1b1b1c);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}',
+      '#dsh-quota-panel .state-warn .dsh-provider-value{color:var(--dsw-static-amber-500,#f59e0b)}',
+      '#dsh-quota-panel .state-error .dsh-provider-value{color:var(--dsw-static-red-500,#ef4444)}',
+      '#dsh-quota-panel .dsh-provider-sub{margin-top:3px;color:var(--dsw-alias-label-secondary,#61666b);font-size:12px;line-height:18px}',
+      '#dsh-quota-panel .dsh-quota-divider{height:1px;margin:14px 0;background:var(--dsw-alias-border-l1,rgba(0,0,0,.06))}',
+      '#dsh-quota-panel .dsh-usage-values{margin-top:3px;color:var(--dsw-alias-label-secondary,#61666b);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums}',
+      '#dsh-quota-panel .dsh-progress{position:relative;width:100%;height:5px;margin-top:10px;overflow:hidden;border-radius:999px;background:var(--dsw-alias-bg-overlay,#ebeef2)}',
+      '#dsh-quota-panel .dsh-progress-fill{height:100%;width:0;border-radius:inherit;background:var(--dsw-static-deepseek-500,#4176e6);transition:width 300ms ease,background-color 160ms ease}',
+      '#dsh-quota-panel .state-warn .dsh-progress-fill{background:var(--dsw-static-amber-500,#f59e0b)}',
+      '#dsh-quota-panel .state-error .dsh-progress-fill{background:var(--dsw-static-red-500,#ef4444)}',
+      '#dsh-quota-panel .dsh-usage-caption{margin-top:8px;color:var(--dsw-alias-label-secondary,#61666b);font-size:12px;line-height:18px}'
+    ].join('\n');
+    var style = el('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  function createPanel() {
+    var panel = el('div');
+    panel.id = panelId;
+    var header = el('div', 'dsh-quota-header');
+    header.appendChild(el('div', 'dsh-quota-title', '模型额度'));
+    refreshBtn = el('button', 'dsh-quota-refresh', '↻');
+    refreshBtn.type = 'button';
+    refreshBtn.setAttribute('aria-label', '刷新模型额度');
+    refreshBtn.addEventListener('click', function () { refreshAll(); });
+    header.appendChild(refreshBtn);
+    panel.appendChild(header);
     for (var i = 0; i < ROWS.length; i++) {
-      var row = document.getElementById('dsh-row-' + i);
-      if (row) renderRow(ROWS[i], row);
+      if (i > 0) panel.appendChild(el('div', 'dsh-quota-divider'));
+      var view = createProviderView(ROWS[i]);
+      VIEWS[ROWS[i].id] = view;
+      panel.appendChild(view.root);
+    }
+    return panel;
+  }
+
+  async function refreshProvider(spec) {
+    var view = VIEWS[spec.id];
+    if (!view) return;
+    try {
+      var response = await fetch('/api/quota/' + encodeURIComponent(spec.id), { cache: 'no-store' });
+      var data = await response.json();
+      if (spec.format === 'deepseek-balance') renderDeepSeek(view, spec, data);
+      else renderUsage(view, spec, data);
+    } catch (error) {
+      renderProviderError(view, spec, error);
+    }
+  }
+
+  async function refreshAll() {
+    if (refreshing) return;
+    refreshing = true;
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add('is-loading');
+    try {
+      await Promise.all(ROWS.map(function (spec) { return refreshProvider(spec); }));
+    } finally {
+      refreshing = false;
+      refreshBtn.disabled = false;
+      refreshBtn.classList.remove('is-loading');
     }
   }
 
   function mount() {
     if (document.getElementById(panelId)) return;
-    var style = document.createElement('style');
-    style.textContent = '#dsh-quota-panel{position:fixed;right:14px;bottom:14px;z-index:2147483000;display:flex;flex-direction:column;gap:4px;padding:8px 12px;border-radius:12px;background:rgba(18,22,30,.85);color:#7ee787;font:600 12px/1.5 ui-monospace,Consolas,monospace;letter-spacing:.2px;box-shadow:0 2px 12px rgba(0,0,0,.45);border:1px solid rgba(126,231,135,.35);backdrop-filter:blur(4px);cursor:pointer;user-select:none;transition:opacity .2s}';
-    style.textContent += '#dsh-quota-panel:hover{opacity:.75}';
-    style.textContent += '#dsh-quota-panel .warn{color:#ffd28a}';
-    style.textContent += '#dsh-quota-panel .err{color:#ff9f9f}';
-    document.head.appendChild(style);
-    var panel = el('div');
-    panel.id = panelId;
-    for (var i = 0; i < ROWS.length; i++) {
-      var row = el('div', 'row', ROWS[i].label + ': \u2026');
-      row.id = 'dsh-row-' + i;
-      panel.appendChild(row);
-    }
-    panel.addEventListener('click', refresh);
+    injectStyles();
+    var panel = createPanel();
     document.body.appendChild(panel);
-    refresh();
-    setInterval(refresh, AUTO_MS);
+    refreshAll();
+    setInterval(function () {
+      if (!document.hidden) refreshAll();
+    }, AUTO_MS);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) refreshAll();
+    });
   }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', mount);
   } else {

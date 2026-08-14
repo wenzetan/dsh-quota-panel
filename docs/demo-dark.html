@@ -1,142 +1,88 @@
-/**
- * dsh-quota-panel — provider quota card for the dsh web surface.
- *
- * Host plugin (zero runtime dependencies):
- *  1. For every configured provider it registers one server-side proxy route
- *     `/api/quota/<id>`. The API key is resolved through `ctx.credentials` and
- *     never reaches the browser; the endpoint is called host-side with
- *     `Authorization: Bearer <key>` and the JSON body is passed through.
- *  2. It taps the served index.html and injects one self-contained page script
- *     that renders a Harness-native floating status card (bottom-right):
- *     a "模型额度" header with a refresh button, then one structured row per
- *     provider — status dot, provider name, primary value, secondary line —
- *     with a progress bar for usage-style providers.
- *
- * The card is styled with the Harness design tokens (`--dsw-alias-*`,
- * `--dsw-static-*`, `--dsw-shadow-*`, `--dsw-font-*`) and falls back to
- * sensible values when tokens are absent, so it follows the product theme
- * (light/dark) instead of carrying its own palette.
- *
- * Providers are config-driven. Each entry:
- *
- *   id:          route id, also the row key (`/api/quota/<id>`); ^[a-z0-9-]+$
- *   label:       provider name, e.g. "DeepSeek"
- *   credential:  credential reference, e.g. "DEEPSEEK_API_KEY"
- *   endpoint:    quota/balance JSON endpoint to proxy (GET, Bearer auth)
- *   format:      row renderer: "deepseek-balance" | "opencode-usage"
- *   balanceTiers: (deepseek-balance) balance levels { critical, warn, healthy },
- *                defaults { 10, 20, 50 }: <=critical "建议充值" (red),
- *                <=warn "余额紧张" (amber), <=healthy "余额正常", else "余额充足"
- *   lowBalance:  legacy alias for balanceTiers.warn
- *   windowLabels: (opencode-usage) labels for the three windows, defaults
- *                { rolling: "滚", weekly: "周", monthly: "月" }
- *   warnPercent / errorPercent: (opencode-usage) thresholds, defaults 70 / 90
- *
- * Example mount (profile patch):
- *
- *   - insert:
- *       - id: quota-panel
- *         name: 'dsh-quota-panel'
- *         inject: [webServer, credentials]
- *         config:
- *           refreshMs: 60000
- *           providers:
- *             - id: deepseek
- *               label: DeepSeek
- *               credential: DEEPSEEK_API_KEY
- *               endpoint: https://api.deepseek.com/user/balance
- *               format: deepseek-balance
- *             - id: opencode-go
- *               label: OpenCode Go
- *               credential: OPENCODE_GO_API_KEY
- *               endpoint: https://opencode.ai/zen/go/v1/usage
- *               format: opencode-usage
- */
-export const name = 'quota-panel';
-
-export const inject = ['webServer', 'credentials'];
-
-const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
-
-function sendJson(res, status, body) {
-	res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
-	res.end(JSON.stringify(body));
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>dsh-quota-panel demo (dark)</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--dsw-alias-bg-layer-2, #fff); font-family: var(--dsw-font-family, system-ui, sans-serif); color: var(--dsw-alias-label-primary, #1b1b1c); }
+  body {
+  --dsw-alias-bg-layer-2: #ffffff;
+  --dsw-alias-bg-overlay: #ebeef2;
+  --dsw-alias-border-l1: rgba(0,0,0,.06);
+  --dsw-alias-border-l2: rgba(0,0,0,.10);
+  --dsw-alias-label-primary: #1b1b1c;
+  --dsw-alias-label-secondary: #61666b;
+  --dsw-alias-interactive-bg-hover: rgba(0,0,0,.05);
+  --dsw-static-green-500: #22c55e;
+  --dsw-static-amber-500: #f59e0b;
+  --dsw-static-red-500: #ef4444;
+  --dsw-static-deepseek-500: #4176e6;
+  --dsw-static-neutral-bluish-400: #adb2b8;
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0,0,0,.2), 0 0 4px 0 rgba(0,0,0,.02), 0 12px 32px 0 rgba(0,0,0,.08);
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
-
-/** Numeric config field with a default; NaN falls back to the default. */
-function numOf(value, fallback) {
-	return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+body[data-ds-dark-theme] {
+  --dsw-alias-bg-layer-2: #2c2c2e;
+  --dsw-alias-bg-overlay: #434346;
+  --dsw-alias-border-l1: rgba(255,255,255,.06);
+  --dsw-alias-border-l2: rgba(255,255,255,.12);
+  --dsw-alias-label-primary: #f2f2f2;
+  --dsw-alias-label-secondary: #c6c8cc;
+  --dsw-alias-interactive-bg-hover: rgba(255,255,255,.08);
+  --dsw-static-green-500: #22c55e;
+  --dsw-static-amber-500: #f59e0b;
+  --dsw-static-red-500: #f87171;
+  --dsw-static-deepseek-500: #4d82f0;
+  --dsw-static-neutral-bluish-400: #9aa0a8;
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0,0,0,.4), 0 0 4px 0 rgba(0,0,0,.1), 0 12px 32px 0 rgba(0,0,0,.35);
 }
-
-/** Normalize and validate the plugin config; throws with a readable message. */
-function normalizeConfig(raw) {
-	const config = { refreshMs: 60000, providers: [], ...(raw && typeof raw === 'object' ? raw : {}) };
-	if (typeof config.refreshMs !== 'number' || !(config.refreshMs >= 5000)) {
-		throw new Error('quota-panel: config.refreshMs must be a number >= 5000');
-	}
-	if (!Array.isArray(config.providers)) throw new Error('quota-panel: config.providers must be an array');
-	const seen = new Set();
-	const providers = config.providers.map((entry, index) => {
-		const at = `quota-panel: config.providers[${index}]`;
-		if (!entry || typeof entry !== 'object') throw new Error(`${at} must be an object`);
-		const { id, label, credential, endpoint, format = 'deepseek-balance' } = entry;
-		if (typeof id !== 'string' || !PROVIDER_ID_PATTERN.test(id)) throw new Error(`${at}.id must match /^[a-z0-9-]+$/`);
-		if (seen.has(id)) throw new Error(`${at}.id duplicates "${id}"`);
-		seen.add(id);
-		if (typeof label !== 'string' || !label) throw new Error(`${at}.label must be a non-empty string`);
-		if (typeof credential !== 'string' || !credential) throw new Error(`${at}.credential must be a non-empty string`);
-		if (typeof endpoint !== 'string' || !/^https?:\/\//.test(endpoint)) throw new Error(`${at}.endpoint must be an http(s) URL`);
-		if (format !== 'deepseek-balance' && format !== 'opencode-usage') throw new Error(`${at}.format must be "deepseek-balance" or "opencode-usage"`);
-		const windowLabels = {
-			rolling: '滚',
-			weekly: '周',
-			monthly: '月',
-			...(entry.windowLabels && typeof entry.windowLabels === 'object' ? entry.windowLabels : {})
-		};
-		const warnPercent = numOf(entry.warnPercent, 70);
-		const errorPercent = numOf(entry.errorPercent, 90);
-		// Balance tiers: explicit object wins, legacy lowBalance maps to warn.
-		const tiers = entry.balanceTiers && typeof entry.balanceTiers === 'object'
-			? {
-				critical: numOf(entry.balanceTiers.critical, 10),
-				warn: numOf(entry.balanceTiers.warn, 20),
-				healthy: numOf(entry.balanceTiers.healthy, 50)
-			}
-			: typeof entry.lowBalance === 'number' && Number.isFinite(entry.lowBalance)
-				? { critical: entry.lowBalance / 2, warn: entry.lowBalance, healthy: 50 }
-				: { critical: 10, warn: 20, healthy: 50 };
-		if (!(tiers.critical <= tiers.warn && tiers.warn <= tiers.healthy)) {
-			throw new Error(`${at}.balanceTiers must satisfy critical <= warn <= healthy`);
-		}
-		return { id, label, credential, endpoint, format, windowLabels, warnPercent, errorPercent, balanceTiers: tiers };
-	});
-	return { refreshMs: config.refreshMs, providers };
-}
-
-/** JSON-safe row spec embedded into the injected page script. */
-function rowSpec(provider) {
-	return {
-		id: provider.id,
-		label: provider.label,
-		format: provider.format,
-		windowLabels: provider.windowLabels,
-		warnPercent: provider.warnPercent,
-		errorPercent: provider.errorPercent,
-		balanceTiers: provider.balanceTiers
-	};
-}
-
-/**
- * Build the injected page script. ROWS is a JSON literal, so every value is
- * JSON-escaped; the surrounding script contains no literal `</script>`.
- * @param rows - the provider row specs.
- * @param refreshMs - auto-refresh interval.
- */
-function buildPageScript(rows, refreshMs) {
-	const rowsJson = JSON.stringify(rows).replace(/</g, '\\u003C');
-	const script = `(function () {
-  var AUTO_MS = ${refreshMs};
-  var ROWS = ${rowsJson};
+  .chrome { display: flex; height: 100vh; }
+  .sidebar { width: 220px; background: var(--dsw-alias-bg-layer-2, #fafafa); border-right: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06)); padding: 12px; }
+  .brand { font-size: 13px; font-weight: 700; margin-bottom: 14px; }
+  .nav { font-size: 12px; line-height: 2.2; color: var(--dsw-alias-label-secondary, #61666b); }
+  .main { flex: 1; display: flex; flex-direction: column; }
+  .chat { flex: 1; padding: 24px; overflow: hidden; }
+  .msg { max-width: 640px; margin: 0 auto 14px; font-size: 13px; line-height: 1.6; }
+  .msg .who { font-weight: 700; color: var(--dsw-static-deepseek-500, #4176e6); margin-bottom: 4px; }
+  .msg p { margin: 4px 0; color: var(--dsw-alias-label-secondary, #61666b); }
+  .composer { border-top: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06)); padding: 12px 24px; }
+  .box { max-width: 640px; margin: 0 auto; background: var(--dsw-alias-bg-layer-2, #fff); border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1)); border-radius: 10px; padding: 10px 14px; color: var(--dsw-alias-label-secondary, #61666b); font-size: 13px; }
+</style>
+</head>
+<body data-ds-dark-theme>
+<div class="chrome">
+  <div class="sidebar">
+    <div class="brand">DeepSeek Harness</div>
+    <div class="nav">新会话<br/>会话历史<br/>工作区<br/>设置</div>
+  </div>
+  <div class="main">
+    <div class="chat">
+      <div class="msg"><div class="who">助手</div><p>你好！我是运行在 DeepSeek Harness 里的编程智能体。</p></div>
+      <div class="msg"><div class="who">用户</div><p>帮我看看账户余额和用量。</p></div>
+      <div class="msg"><div class="who">助手</div><p>好的，右下角卡片实时显示各提供方的配额情况。</p></div>
+    </div>
+    <div class="composer"><div class="box">输入消息…</div></div>
+  </div>
+</div>
+<script>
+window.fetch = function (url) {
+  var data;
+  if (String(url).indexOf('deepseek') >= 0) {
+    data = { is_available: true, balance_infos: [{ currency: 'CNY', total_balance: '58.36', granted_balance: '0.00', topped_up_balance: '58.36' }] };
+  } else {
+    data = { usage: {
+      rolling: { status: 'ok', percent: 10, resetsAt: new Date(Date.now() + 4 * 3600e3).toISOString() },
+      weekly:  { status: 'ok', percent: 45, resetsAt: new Date(Date.now() + 2 * 86400e3).toISOString() },
+      monthly: { status: 'ok', percent: 22, resetsAt: new Date(Date.now() + 27 * 86400e3).toISOString() }
+    } };
+  }
+  return Promise.resolve({ json: function () { return Promise.resolve(data); } });
+};
+</script>
+<script>(function () {
+  var AUTO_MS = 60000;
+  var ROWS = [{"id":"deepseek","label":"DeepSeek","format":"deepseek-balance","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}},{"id":"opencode-go","label":"OpenCode Go","format":"opencode-usage","windowLabels":{"rolling":"五","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}}];
   var panelId = 'dsh-quota-panel';
   var VIEWS = {};      // spec.id -> view object
   var refreshBtn = null;
@@ -235,7 +181,7 @@ function buildPageScript(rows, refreshMs) {
       setState(view, 'ok');
       view.sub.textContent = '余额充足';
     }
-    view.root.title = 'currency: ' + info.currency + '\\ngranted: ¥' + info.granted_balance + '\\ntopped-up: ¥' + info.topped_up_balance;
+    view.root.title = 'currency: ' + info.currency + '\ngranted: ¥' + info.granted_balance + '\ntopped-up: ¥' + info.topped_up_balance;
   }
 
   function renderUsage(view, spec, data) {
@@ -263,7 +209,7 @@ function buildPageScript(rows, refreshMs) {
     else if (high >= spec.warnPercent) setState(view, 'warn');
     else setState(view, 'ok');
 
-    view.root.title = 'rolling: ' + rp + '%（重置于 ' + fmtReset(r.resetsAt) + '）' + '\\nweekly: ' + wp + '%（重置于 ' + fmtReset(w.resetsAt) + '）' + '\\nmonthly: ' + mp + '%（重置于 ' + fmtReset(m.resetsAt) + '）';
+    view.root.title = 'rolling: ' + rp + '%（重置于 ' + fmtReset(r.resetsAt) + '）' + '\nweekly: ' + wp + '%（重置于 ' + fmtReset(w.resetsAt) + '）' + '\nmonthly: ' + mp + '%（重置于 ' + fmtReset(m.resetsAt) + '）';
   }
 
   function renderProviderError(view, spec, error) {
@@ -309,7 +255,7 @@ function buildPageScript(rows, refreshMs) {
       '#dsh-quota-panel .state-warn .dsh-progress-fill{background:var(--dsw-static-amber-500,#f59e0b)}',
       '#dsh-quota-panel .state-error .dsh-progress-fill{background:var(--dsw-static-red-500,#ef4444)}',
       '#dsh-quota-panel .dsh-usage-caption{margin-top:8px;color:var(--dsw-alias-label-secondary,#61666b);font-size:12px;line-height:18px}'
-    ].join('\\n');
+    ].join('\n');
     var style = el('style');
     style.textContent = css;
     document.head.appendChild(style);
@@ -381,50 +327,6 @@ function buildPageScript(rows, refreshMs) {
   } else {
     mount();
   }
-})();`;
-	return `<script>${script}<\/script>`;
-}
-
-/**
- * Apply the plugin: one proxy route per provider plus the index tap.
- * @param ctx - plugin context with webServer and credentials services.
- * @param config - raw plugin config (normalized here, no schema dependency).
- */
-export function apply(ctx, config) {
-	const { refreshMs, providers } = normalizeConfig(config);
-	ctx.effect(() => {
-		const disposers = providers.map((provider) => {
-			return ctx.webServer.register({
-				kind: 'exact',
-				path: `/api/quota/${provider.id}`,
-				handler: async (req, res) => {
-					if (req.method !== 'GET') {
-						sendJson(res, 405, { error: 'method not allowed' });
-						return;
-					}
-					try {
-						const hit = await ctx.credentials.resolve(provider.credential);
-						if (!hit) {
-							sendJson(res, 200, { error: `${provider.credential} is not configured` });
-							return;
-						}
-						const upstream = await fetch(provider.endpoint, {
-							headers: { authorization: `Bearer ${hit.value}` },
-							signal: AbortSignal.timeout(15000)
-						});
-						const text = await upstream.text();
-						res.writeHead(upstream.status, { 'content-type': 'application/json; charset=utf-8' });
-						res.end(text);
-					} catch (error) {
-						sendJson(res, 502, { error: String(error) });
-					}
-				}
-			});
-		});
-		const disposeTap = ctx.webServer.tapIndex((html) => html.replace('</body>', buildPageScript(providers.map(rowSpec), refreshMs) + '</body>'));
-		return () => {
-			for (const dispose of disposers) dispose();
-			disposeTap();
-		};
-	}, 'quota-panel: quota routes + index tap');
-}
+})();</script></body>
+</body>
+</html>

@@ -5,17 +5,29 @@
 - insert:
     - id: quota-panel
       name: 'dsh-quota-panel'
-      inject: [webServer, credentials]
+      inject:
+        - webServer
+        - credentials
       config:
         refreshMs: 60000
         providers:
           - id: deepseek
-            label: DS 余额
+            label: DeepSeek
             credential: DEEPSEEK_API_KEY
             endpoint: https://api.deepseek.com/user/balance
             format: deepseek-balance
+            balanceTiers:
+              critical: 10
+              warn: 20
+              healthy: 50
           - id: opencode-go
-            label: OC Go
+            label: OpenCode Go
             credential: OPENCODE_GO_API_KEY
             endpoint: https://opencode.ai/zen/go/v1/usage
             format: opencode-usage
+            windowLabels:
+              rolling: 五
+              weekly: 周
+              monthly: 月
+            warnPercent: 70
+            errorPercent: 90
