@@ -10,7 +10,7 @@ const USER_DATA = 'D:/deepseek/dsh-quota-panel/.chrome-cdp';
 const SHOTS = {
 	light: {
 		url: 'file:///D:/deepseek/dsh-quota-panel/docs/demo.html',
-		out: 'D:/deepseek/dsh-quota-panel/docs/screenshot.png'
+		out: 'D:/deepseek/dsh-quota-panel/docs/screenshot-light.png'
 	},
 	dark: {
 		url: 'file:///D:/deepseek/dsh-quota-panel/docs/demo-dark.html',

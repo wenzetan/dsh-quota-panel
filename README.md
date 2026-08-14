@@ -23,7 +23,7 @@ instead of carrying its own palette.
 
 Light theme:
 
-![Panel (light)](docs/panel.png)
+![Panel (light)](docs/panel-light.png)
 
 Dark theme:
 
@@ -31,7 +31,7 @@ Dark theme:
 
 Full page (light):
 
-![Full page](docs/screenshot.png)
+![Full page](docs/screenshot-light.png)
 
 ## Install
 

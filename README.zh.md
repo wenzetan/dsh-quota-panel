@@ -18,7 +18,7 @@
 
 浅色主题：
 
-![面板（浅色）](docs/panel.png)
+![面板（浅色）](docs/panel-light.png)
 
 深色主题：
 
@@ -26,7 +26,7 @@
 
 完整页面（浅色）：
 
-![完整页面](docs/screenshot.png)
+![完整页面](docs/screenshot-light.png)
 
 ## 安装
 
