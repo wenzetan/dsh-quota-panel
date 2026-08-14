@@ -42,9 +42,10 @@ Expanded card (light / dark):
 ![Panel (light)](docs/panel-light.png)
 ![Panel (dark)](docs/panel-dark.png)
 
-Full page, collapsed (light):
+Full page, collapsed capsule (light / dark):
 
-![Full page](docs/screenshot-light.png)
+![Full page, capsule (light)](docs/screenshot-light.png)
+![Full page, capsule (dark)](docs/screenshot-dark.png)
 
 ## Install
 
@@ -123,6 +124,13 @@ With the default `balanceTiers {critical: 10, warn: 20, healthy: 50}`:
 | `< warnPercent` | ok (green dot, DeepSeek-blue progress) |
 | `>= warnPercent` | warn (amber dot + progress) |
 | `>= errorPercent` | error (red dot + progress) |
+
+## Changelog
+
+- **v0.3.0** — Two sizes: collapsed capsule (independent per-account dot +
+  battery-colored value) expands into the full card.
+- **v0.2.0** — Harness-native card: design tokens, balance tiers, progress bar.
+- **v0.1.0** — Initial floating panel: server-side quota proxies + page badge.
 
 ## Security
 

@@ -36,9 +36,10 @@
 ![面板（浅色）](docs/panel-light.png)
 ![面板（深色）](docs/panel-dark.png)
 
-完整页面（收起态，浅色）：
+完整页面（小胶囊状态，浅色 / 深色）：
 
-![完整页面](docs/screenshot-light.png)
+![完整页面（浅色）](docs/screenshot-light.png)
+![完整页面（深色）](docs/screenshot-dark.png)
 
 ## 安装
 
@@ -116,6 +117,12 @@ dsh plugin --profile web add "github:brittanistrehlowll-oss/dsh-quota-panel"
 | `< warnPercent` | ok（绿点，DeepSeek 蓝进度条） |
 | `>= warnPercent` | warn（琥珀点 + 进度条） |
 | `>= errorPercent` | error（红点 + 进度条） |
+
+## 更新日志
+
+- **v0.3.0** — 双尺寸：收起为极简胶囊（每账户独立状态点 + 电量式三色数值），点击展开完整卡片。
+- **v0.2.0** — Harness 原生卡片：设计 Token 驱动、余额分级阈值、用量进度条。
+- **v0.1.0** — 初版悬浮面板：服务端额度代理 + 页面角标。
 
 ## 安全
 
