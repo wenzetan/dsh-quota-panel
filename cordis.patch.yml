@@ -1,0 +1,21 @@
+# dsh-quota-panel bundle patch: mounts the quota panel into a dsh profile.
+# Applied as a profile layer when this package is installed with
+# `dsh plugin --profile web add "github:owner/dsh-quota-panel"`.
+
+- insert:
+    - id: quota-panel
+      name: 'dsh-quota-panel'
+      inject: [webServer, credentials]
+      config:
+        refreshMs: 60000
+        providers:
+          - id: deepseek
+            label: DS 余额
+            credential: DEEPSEEK_API_KEY
+            endpoint: https://api.deepseek.com/user/balance
+            format: deepseek-balance
+          - id: opencode-go
+            label: OC Go
+            credential: OPENCODE_GO_API_KEY
+            endpoint: https://opencode.ai/zen/go/v1/usage
+            format: opencode-usage

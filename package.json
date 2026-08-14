@@ -1,0 +1,35 @@
+{
+  "name": "dsh-quota-panel",
+  "description": "Provider quota/balance corner panel for the dsh web surface: server-side credential proxies plus a config-driven page badge for DeepSeek balance and OpenCode Zen Go usage windows.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "quota",
+    "balance",
+    "usage",
+    "opencode"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dsh-external/dsh-quota-panel.git"
+  }
+}
