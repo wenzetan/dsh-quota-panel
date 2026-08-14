@@ -65,7 +65,16 @@ const collapsed = await evaluate(`JSON.stringify({
   composerBg: getComputedStyle(document.querySelector('.composer')).backgroundColor,
   capsule: (() => { const c = document.getElementById('dsh-quota-capsule'); if (!c) return null; const r = c.getBoundingClientRect(); return {
     visible: !c.hidden, hidden: c.hidden, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
-    text: c.textContent, dot: getComputedStyle(c.querySelector('.dsh-status-dot')).backgroundColor, ariaExpanded: c.getAttribute('aria-expanded')
+    text: c.textContent, ariaExpanded: c.getAttribute('aria-expanded'),
+    pairs: Array.from(c.querySelectorAll('.dsh-capsule-dot')).map(function (dot, i) {
+      const value = c.querySelectorAll('.dsh-capsule-item')[i];
+      return {
+        dotColor: getComputedStyle(dot).backgroundColor,
+        dotClass: dot.className,
+        value: value ? value.textContent : null,
+        valueClass: value ? value.className : null
+      };
+    })
   }; })(),
   cardHidden: (() => { const c = document.getElementById('dsh-quota-card'); return c ? c.hidden : null; })()
 })`);

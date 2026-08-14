@@ -10,8 +10,9 @@ server-side proxy route `/api/quota/<id>` — the API key is resolved through th
 credentials seam and **never reaches the browser** — then injects a small
 Harness-native status widget (bottom-right) with two sizes:
 
-- **Collapsed (default)** — a minimal glanceable capsule
-  (`● 额度 ¥58.36 · 45%`): worst status dot + joined summaries. Click to expand.
+- **Collapsed (default)** — a minimal glanceable capsule: one independent
+  "status dot + value" pair per account (e.g. `● ¥58.36 · ● 45%`), no text
+  labels — only the affected account's dot changes color. Click to expand.
 - **Expanded** — the full card: "模型额度" header with refresh/collapse
   buttons, then one structured row per provider (status dot, name, primary
   value, secondary line, progress bar for usage-style providers). The collapse
@@ -19,6 +20,10 @@ Harness-native status widget (bottom-right) with two sizes:
 
 Both sizes auto-refresh (paused while the page is hidden; the refresh button
 spins while a manual refresh runs and re-entrant clicks are ignored).
+
+In the capsule, usage percentages are battery-colored (green when healthy,
+amber when tight, red when critical), matching their independent dot; balance
+values are tinted only when their own state warns or errors.
 
 The widget is styled with the Harness design tokens (`--dsw-alias-*`,
 `--dsw-static-*`, `--dsw-shadow-*`, `--dsw-font-*`) and falls back to sensible
