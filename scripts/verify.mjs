@@ -1,6 +1,5 @@
-// Verify the demo pages rendered the v0.2 native card, dump DOM facts, and
-// report the panel rect for cropping. Used to prove the screenshots show a
-// correctly-rendered card (the capturing model cannot view images).
+// Verify the demo pages: collapsed capsule by default, click expands the
+// card, collapse button shrinks back; report computed backgrounds + rects.
 import { spawn } from 'node:child_process';
 import { mkdir, rm } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -51,30 +50,59 @@ const send = (method, params = {}) => new Promise((resolve, reject) => {
 });
 await new Promise((resolve) => { ws.onopen = resolve; });
 
+const evaluate = async (expression) => {
+	const res = await send('Runtime.evaluate', { expression, returnByValue: true });
+	return res.result.value;
+};
+
 await send('Page.enable');
 await send('Page.navigate', { url });
 await sleep(4000);
 
-const evalResult = await send('Runtime.evaluate', {
-	expression: `JSON.stringify({
-    panel: (() => { const p = document.getElementById('dsh-quota-panel'); if (!p) return null; const r = p.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), z: getComputedStyle(p).zIndex, radius: getComputedStyle(p).borderRadius, bg: getComputedStyle(p).backgroundColor }; })(),
-    providers: Array.from(document.querySelectorAll('#dsh-quota-panel .dsh-provider')).map(function (p) {
-      return {
-        state: p.className,
-        name: p.querySelector('.dsh-provider-name') && p.querySelector('.dsh-provider-name').textContent,
-        value: p.querySelector('.dsh-provider-value') && p.querySelector('.dsh-provider-value').textContent,
-        sub: p.querySelector('.dsh-provider-sub') && p.querySelector('.dsh-provider-sub').textContent,
-        usage: p.querySelector('.dsh-usage-values') && p.querySelector('.dsh-usage-values').textContent,
-        barWidth: p.querySelector('.dsh-progress-fill') && p.querySelector('.dsh-progress-fill').style.width,
-        caption: p.querySelector('.dsh-usage-caption') && p.querySelector('.dsh-usage-caption').textContent
-      };
-    }),
-    title: document.querySelector('#dsh-quota-panel .dsh-quota-title') && document.querySelector('#dsh-quota-panel .dsh-quota-title').textContent,
-    refreshLabel: document.querySelector('#dsh-quota-panel .dsh-quota-refresh') && document.querySelector('#dsh-quota-panel .dsh-quota-refresh').getAttribute('aria-label')
-  })`,
-	returnByValue: true
-});
-console.log(evalResult.result.value);
+const collapsed = await evaluate(`JSON.stringify({
+  bodyBg: getComputedStyle(document.body).backgroundColor,
+  sidebarBg: getComputedStyle(document.querySelector('.sidebar')).backgroundColor,
+  composerBg: getComputedStyle(document.querySelector('.composer')).backgroundColor,
+  capsule: (() => { const c = document.getElementById('dsh-quota-capsule'); if (!c) return null; const r = c.getBoundingClientRect(); return {
+    visible: !c.hidden, hidden: c.hidden, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
+    text: c.textContent, dot: getComputedStyle(c.querySelector('.dsh-status-dot')).backgroundColor, ariaExpanded: c.getAttribute('aria-expanded')
+  }; })(),
+  cardHidden: (() => { const c = document.getElementById('dsh-quota-card'); return c ? c.hidden : null; })()
+})`);
+console.log('COLLAPSED:', collapsed);
+
+await evaluate(`document.getElementById('dsh-quota-capsule').click()`);
+await sleep(2000);
+
+const expanded = await evaluate(`JSON.stringify({
+  capsuleHidden: document.getElementById('dsh-quota-capsule').hidden,
+  capsuleAriaExpanded: document.getElementById('dsh-quota-capsule').getAttribute('aria-expanded'),
+  card: (() => { const c = document.getElementById('dsh-quota-card'); const r = c.getBoundingClientRect(); return {
+    visible: !c.hidden, hidden: c.hidden, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
+    bg: getComputedStyle(c).backgroundColor
+  }; })(),
+  providers: Array.from(document.querySelectorAll('#dsh-quota-card .dsh-provider')).map(function (p) {
+    return {
+      state: p.className,
+      name: p.querySelector('.dsh-provider-name') && p.querySelector('.dsh-provider-name').textContent,
+      value: p.querySelector('.dsh-provider-value') && p.querySelector('.dsh-provider-value').textContent,
+      sub: p.querySelector('.dsh-provider-sub') && p.querySelector('.dsh-provider-sub').textContent,
+      usage: p.querySelector('.dsh-usage-values') && p.querySelector('.dsh-usage-values').textContent,
+      barWidth: p.querySelector('.dsh-progress-fill') && p.querySelector('.dsh-progress-fill').style.width,
+      caption: p.querySelector('.dsh-usage-caption') && p.querySelector('.dsh-usage-caption').textContent
+    };
+  })
+})`);
+console.log('EXPANDED:', expanded);
+
+await evaluate(`document.querySelectorAll('#dsh-quota-card .dsh-quota-icon')[1].click()`);
+await sleep(500);
+const recollapsed = await evaluate(`JSON.stringify({
+  capsuleVisible: !document.getElementById('dsh-quota-capsule').hidden,
+  cardHidden: document.getElementById('dsh-quota-card').hidden,
+  ariaExpanded: document.getElementById('dsh-quota-capsule').getAttribute('aria-expanded')
+})`);
+console.log('RECOLLAPSED:', recollapsed);
 
 ws.close();
 chrome.kill();

@@ -2,34 +2,42 @@
 
 English | [中文](README.zh.md)
 
-Provider quota / balance status card for the **dsh web surface** (DeepSeek
+Provider quota / balance status widget for the **dsh web surface** (DeepSeek
 Harness).
 
 A zero-dependency host plugin: for every configured provider it registers one
 server-side proxy route `/api/quota/<id>` — the API key is resolved through the
 credentials seam and **never reaches the browser** — then injects a small
-Harness-native floating card (bottom-right) that fetches the routes and renders
-one structured row per provider: status dot, provider name, primary value,
-secondary line, and a progress bar for usage-style providers. Auto-refresh
-pauses while the page is hidden; the header refresh button spins while a manual
-refresh runs and re-entrant clicks are ignored.
+Harness-native status widget (bottom-right) with two sizes:
 
-The card is styled with the Harness design tokens (`--dsw-alias-*`,
+- **Collapsed (default)** — a minimal glanceable capsule
+  (`● 额度 ¥58.36 · 45%`): worst status dot + joined summaries. Click to expand.
+- **Expanded** — the full card: "模型额度" header with refresh/collapse
+  buttons, then one structured row per provider (status dot, name, primary
+  value, secondary line, progress bar for usage-style providers). The collapse
+  button shrinks it back.
+
+Both sizes auto-refresh (paused while the page is hidden; the refresh button
+spins while a manual refresh runs and re-entrant clicks are ignored).
+
+The widget is styled with the Harness design tokens (`--dsw-alias-*`,
 `--dsw-static-*`, `--dsw-shadow-*`, `--dsw-font-*`) and falls back to sensible
 values when tokens are absent, so it follows the product theme (light/dark)
 instead of carrying its own palette.
 
 ## Screenshots
 
-Light theme:
+Collapsed capsule (light / dark):
+
+![Capsule (light)](docs/capsule-light.png)
+![Capsule (dark)](docs/capsule-dark.png)
+
+Expanded card (light / dark):
 
 ![Panel (light)](docs/panel-light.png)
-
-Dark theme:
-
 ![Panel (dark)](docs/panel-dark.png)
 
-Full page (light):
+Full page, collapsed (light):
 
 ![Full page](docs/screenshot-light.png)
 

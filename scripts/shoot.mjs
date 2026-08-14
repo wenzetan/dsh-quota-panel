@@ -1,4 +1,7 @@
 // Capture PNG screenshots of the demo pages via Chrome DevTools Protocol.
+// For each theme it captures two states:
+//   1. collapsed: the minimal capsule (default state)
+//   2. expanded: the full card (after clicking the capsule)
 // Usage: node scripts/shoot.mjs [light|dark|both]
 import { spawn } from 'node:child_process';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
@@ -10,11 +13,13 @@ const USER_DATA = 'D:/deepseek/dsh-quota-panel/.chrome-cdp';
 const SHOTS = {
 	light: {
 		url: 'file:///D:/deepseek/dsh-quota-panel/docs/demo.html',
-		out: 'D:/deepseek/dsh-quota-panel/docs/screenshot-light.png'
+		collapsed: 'D:/deepseek/dsh-quota-panel/docs/screenshot-light.png',
+		expanded: 'D:/deepseek/dsh-quota-panel/docs/screenshot-light-expanded.png'
 	},
 	dark: {
 		url: 'file:///D:/deepseek/dsh-quota-panel/docs/demo-dark.html',
-		out: 'D:/deepseek/dsh-quota-panel/docs/screenshot-dark.png'
+		collapsed: 'D:/deepseek/dsh-quota-panel/docs/screenshot-dark.png',
+		expanded: 'D:/deepseek/dsh-quota-panel/docs/screenshot-dark-expanded.png'
 	}
 };
 const mode = process.argv[2] || 'both';
@@ -72,9 +77,20 @@ for (const [key, shot] of Object.entries(SHOTS)) {
 	if (mode !== 'both' && mode !== key) continue;
 	await send('Page.navigate', { url: shot.url });
 	await sleep(4000);
-	const result = await send('Page.captureScreenshot', { format: 'png' });
-	await writeFile(shot.out, Buffer.from(result.data, 'base64'));
-	console.log('saved:', shot.out);
+
+	// 1. collapsed capsule
+	const collapsed = await send('Page.captureScreenshot', { format: 'png' });
+	await writeFile(shot.collapsed, Buffer.from(collapsed.data, 'base64'));
+	console.log('saved (collapsed):', shot.collapsed);
+
+	// 2. click capsule to expand
+	await send('Runtime.evaluate', {
+		expression: "document.getElementById('dsh-quota-capsule').click()"
+	});
+	await sleep(2000);
+	const expanded = await send('Page.captureScreenshot', { format: 'png' });
+	await writeFile(shot.expanded, Buffer.from(expanded.data, 'base64'));
+	console.log('saved (expanded):', shot.expanded);
 }
 
 ws.close();

@@ -1,7 +1,7 @@
 {
   "name": "dsh-quota-panel",
-  "description": "Provider quota/balance corner panel for the dsh web surface: server-side credential proxies plus a config-driven page badge for DeepSeek balance and OpenCode Zen Go usage windows.",
-  "version": "0.2.0",
+  "description": "Provider quota/balance widget for the dsh web surface: collapsed glanceable capsule expanding into a Harness-native card, with server-side credential proxies for DeepSeek balance and OpenCode Zen Go usage windows.",
+  "version": "0.3.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
