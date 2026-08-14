@@ -63,6 +63,8 @@ Cohere、DashScope/通义、百川）目前不支持，见文末「待办」。
 - **刷新间隔** —— 跟随配置（默认）或 15 秒 ~ 5 分钟固定间隔；
 - **预警阈值** —— 逐提供方覆盖：余额型为「预警 ¥/$」（自动推得 critical = 值/2），
   用量型为「预警 %」（error 自动取 max(配置值, 预警+1)）；文本行无阈值；留空恢复配置默认；
+- **代理** —— 逐提供方填写 HTTP(S) 代理 URL（如 `http://127.0.0.1:7890`），
+  仅该供应商经此代理查询；留空走 profile 配置（如有）或直连；
 - **恢复默认** —— 一键清空全部本地设置。
 
 胶囊里的用量百分比按**手机电量式三色**着色：健康绿、紧张琥珀、告急红，
@@ -101,22 +103,12 @@ dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.5.0"
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
 ```
 
-安装后建议刷新一次浏览器页面。零 npm 依赖（schema 库已 vendor），无需
+安装后建议刷新一次浏览器页面。零 npm 依赖（schema 库 schemastery +
+cosmokit，均 MIT，已 vendor 进 `lib/vendor/` 并以相对路径导入），无需
 `allowBuilds` 构建授权。
 
 包声明了 `dsh.bundle.patch`（宿主半自动激活为 profile 层）和 `dsh.client`
 manifest（浏览器半自动进入 `__DSH_BOOT__` 模块图，`immediately: true` 随壳预取）。
-
-从本地改造版安装（开发）：
-
-```sh
-dsh plugin --profile web add "link:/path/to/dsh-quota-panel"
-# 或手动把 profile package.json 依赖改为 link: 后 pnpm install
-```
-
-> 插件零 npm 依赖：schema 库（schemastery + cosmokit，均 MIT）已 vendor 进
-> `lib/vendor/` 并以相对路径导入，因此 `link:` 安装**不需要**仓库自带
-> node_modules——Node 从仓库真实路径向上解析不到 dsh 内置包，vendor 化正是为此。
 
 ## 配置
 
@@ -170,10 +162,17 @@ credential 引用名，UPPER_SNAKE）/ `balanceTiers` / `warnPercent` / `errorPe
 
 ### 代理（部分供应商无法直连时）
 
-`proxies` 定义命名代理（支持 `http://` 与 `https://`，URL 里可带
-`user:pass`）；**没有任何行默认走代理**，每行显式指定才会经过：
+代理在**前端设置面板（⚙ → 代理）**配置：逐供应商填一个 HTTP(S) 代理
+URL（如 `http://127.0.0.1:7890`，可带 `user:pass`），保存在浏览器
+localStorage，即时生效——留空即回到 profile 配置或直连。请求仍由宿主半
+执行：浏览器把每行的代理 URL 随 `fetch-all` payload 发给宿主，宿主校验
+（仅 http/https，socks 不支持）后经该代理请求上游，key 照旧不出宿主。
+
+profile 配置里的 `proxies` + 行级 `proxy` / `catalog.<id>.proxy` 仍可用，
+作为**默认代理**（前端留空时生效）；优先级：**前端设置 > profile 配置 > 直连**。
 
 ```yaml
+# profile 级默认代理示例（前端 ⚙ 面板可逐行覆盖）
 - id: quota-panel
   name: 'dsh-quota-panel'
   config:
@@ -181,7 +180,7 @@ credential 引用名，UPPER_SNAKE）/ `balanceTiers` / `warnPercent` / `errorPe
       home: http://127.0.0.1:7890     # clash / v2rayN 等本地代理的 http 端口
     catalog:
       openrouter:
-        proxy: home                    # 仅 OpenRouter 经代理探测/请求
+        proxy: home                    # OpenRouter 默认经代理（前端可覆盖）
     providers:
       - id: my-agg
         label: 我的聚合站
@@ -193,7 +192,8 @@ credential 引用名，UPPER_SNAKE）/ `balanceTiers` / `warnPercent` / `errorPe
 
 实现为零依赖手写：https 目标走 HTTP `CONNECT` 隧道（TLS over 隧道），
 http 目标走绝对 URI 转发；每行独立 15s 超时与错误捕获，代理故障只记该行
-错误（如 `proxy CONNECT failed: HTTP 403`），不影响其他行。socks5 不支持。
+错误（如 `proxy CONNECT failed: HTTP 403` 或 `client proxy "…": must be
+http:// or https://`），不影响其他行。socks5 不支持。
 
 ### DeepSeek 余额分级
 
@@ -221,8 +221,9 @@ http 目标走绝对 URI 转发；每行独立 15s 超时与错误捕获，代�
 - **v0.5.0** — 内置供应商目录 + 自动发现（探测 credential 引用，9 家供应商零配置上板）；
   新增 8 种 format 适配器（含 one-api/new-api 聚合站 `openai-billing`）；
   `fetch-all` 契约改为宿主侧归一化视图（balance / usage / info），上游 JSON 不再下发；
-  按行 HTTP(S) 代理（CONNECT 隧道 / 绝对 URI，零依赖）；新增 `auto` / `hide` /
-  `proxies` / `catalog` 配置键。
+  按行 HTTP(S) 代理（CONNECT 隧道 / 绝对 URI，零依赖），**代理在 ⚙ 设置面板逐供应商
+  配置**（localStorage，优先于 profile 的 `proxies` / `proxy` 配置）；新增 `auto` /
+  `hide` / `proxies` / `catalog` 配置键。
 - **v0.4.0** — 双面包重构：宿主半改为 loopback Connection RPC 通道（`specs` /
   `fetch-all`）+ `Config` schema；浏览器半迁入 `dsh.client` manifest + `shell.overlay`
   槽位（React）；新增 ⚙ 设置面板（供应商显示 / 刷新间隔 / 预警阈值，localStorage 持久化）。

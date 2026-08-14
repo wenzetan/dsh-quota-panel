@@ -12,7 +12,11 @@
 # single rows, and `catalog: {<id>: {...}}` for partial overrides.
 #
 # Providers that cannot be reached directly (e.g. from within mainland
-# China) can route through an HTTP proxy:
+# China) can route through an HTTP proxy. The primary way is the frontend
+# settings panel (settings gear -> proxy): one proxy URL per provider,
+# persisted to browser localStorage, applied immediately. The config below
+# acts as the profile-level default, used when the frontend leaves the row
+# empty; precedence: frontend settings > profile config > direct.
 #
 #   config:
 #     proxies:

@@ -103,6 +103,8 @@ export interface RowSpec {
   id: string
   label: string
   kind: 'balance' | 'usage' | 'info'
+  /** Name of the profile-configured proxy, or null (the URL itself stays host-side) */
+  proxy?: string | null
   /** (balance) currency symbol rendered before the amount */
   currency?: '¥' | '$'
   balanceTiers?: Required<BalanceTiers>
@@ -127,8 +129,17 @@ export interface FetchRow {
   id: string
   /** Normalized view on success */
   view?: RowView
-  /** Per-row failure (missing credential, HTTP error, timeout, ...) */
+  /** Per-row failure (missing credential, HTTP error, timeout, invalid or refused proxy, ...) */
   error?: string
+}
+
+/** Payload the client half sends with `fetch-all`. */
+export interface FetchAllPayload {
+  /**
+   * Per-row proxy URL overrides from the browser settings panel
+   * (http/https only); each wins over the row's profile-configured proxy.
+   */
+  proxy?: Record<string, string>
 }
 
 export function apply(ctx: any, config?: Config): void

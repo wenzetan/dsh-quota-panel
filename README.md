@@ -74,6 +74,9 @@ localStorage, never written to the profile or uploaded):
   (critical derived as value/2) and "warn %" for usage rows (error derived
   as max(config, warn+1)); text rows have no threshold; empty restores the
   config default;
+- **代理** — per-provider HTTP(S) proxy URL (e.g. `http://127.0.0.1:7890`);
+  only that provider is queried through it; empty falls back to the profile
+  config (if any) or a direct connection;
 - **恢复默认** — clear all local settings at once.
 
 Usage percentages in the capsule use **battery-style three-color** grading:
@@ -116,24 +119,13 @@ dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.5.0"
 ```
 
 Refresh the browser page once after installing. Zero npm dependencies (the
-schema library is vendored), no `allowBuilds` authorization needed.
+schema library — schemastery + cosmokit, both MIT — is vendored under
+`lib/vendor/` with relative-path imports), no `allowBuilds` authorization
+needed.
 
 The package declares `dsh.bundle.patch` (host half auto-activates as a
 profile layer) and the `dsh.client` manifest (browser half auto-joins the
 `__DSH_BOOT__` module graph, `immediately: true` prefetched with the shell).
-
-Install from a local fork (development):
-
-```sh
-dsh plugin --profile web add "link:/path/to/dsh-quota-panel"
-# Or edit the profile package.json dependency to link: and run pnpm install
-```
-
-> Zero npm dependencies: the schema library (schemastery + cosmokit, both
-> MIT) is vendored under `lib/vendor/` and imported by relative path, so a
-> `link:` install needs **no** node_modules in this repo — Node cannot walk
-> up from the repo's real path to dsh's bundled packages; vendoring exists
-> exactly for that.
 
 ## Configuration
 
@@ -188,11 +180,21 @@ Built-in formats (they fix the row kind and currency):
 
 ### Proxy (for providers unreachable directly)
 
-`proxies` defines named proxies (http:// or https://, optionally with
-`user:pass` in the URL); **no row uses a proxy by default** — each row opts
-in explicitly:
+Proxies are configured in the **frontend settings panel (⚙ → 代理)**: one
+HTTP(S) proxy URL per provider (e.g. `http://127.0.0.1:7890`, optionally
+with `user:pass`), persisted to browser localStorage and applied
+immediately — empty falls back to the profile config or a direct
+connection. Requests still execute host-side: the browser sends each row's
+proxy URL with the `fetch-all` payload, the host validates it (http/https
+only, no socks) and routes the upstream request through it, and keys never
+leave the host.
+
+The profile-level `proxies` map plus per-row `proxy` / `catalog.<id>.proxy`
+still works as the **default proxy** (used when the frontend leaves the row
+empty); precedence: **frontend settings > profile config > direct**.
 
 ```yaml
+# profile-level default proxy (the ⚙ panel overrides per row)
 - id: quota-panel
   name: 'dsh-quota-panel'
   config:
@@ -200,7 +202,7 @@ in explicitly:
       home: http://127.0.0.1:7890     # local clash / v2rayN http port
     catalog:
       openrouter:
-        proxy: home                    # only OpenRouter probes/fetches via the proxy
+        proxy: home                    # OpenRouter defaults to the proxy (frontend may override)
     providers:
       - id: my-agg
         label: 我的聚合站
@@ -214,7 +216,8 @@ The engine is hand-rolled with zero dependencies: https targets go through
 an HTTP `CONNECT` tunnel (TLS over the tunnel socket), http targets through
 absolute-URI forwarding; each row gets its own 15s timeout and error
 capture, and a proxy failure only marks that row (e.g. `proxy CONNECT
-failed: HTTP 403`). socks5 is not supported.
+failed: HTTP 403` or `client proxy "…": must be http:// or https://`).
+socks5 is not supported.
 
 ### DeepSeek balance tiers
 
@@ -244,8 +247,10 @@ Defaults `balanceTiers {critical: 10, warn: 20, healthy: 50}`:
   adapters (incl. `openai-billing` for one-api/new-api aggregators);
   `fetch-all` contract changed to host-normalized views (balance / usage /
   info), upstream JSON no longer crosses the wire; per-row HTTP(S) proxy
-  (CONNECT tunnel / absolute URI, zero dependencies); new `auto` / `hide` /
-  `proxies` / `catalog` config keys.
+  (CONNECT tunnel / absolute URI, zero dependencies), **configured per
+  provider in the ⚙ settings panel** (localStorage, wins over the profile's
+  `proxies` / `proxy` config); new `auto` / `hide` / `proxies` / `catalog`
+  config keys.
 - **v0.4.0** — dual-face refactor: loopback Connection RPC channel
   (`specs` / `fetch-all`) + `Config` schema in the host half; browser half
   moved to the `dsh.client` manifest + `shell.overlay` slot (React); ⚙

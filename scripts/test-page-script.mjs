@@ -149,6 +149,13 @@ handler = mount({ hide: ['zhipu'] });
 specs = await handler('specs', null, undefined);
 check('A: hide removes catalog row', !specs.value.rows.some((r) => r.id === 'zhipu'));
 
+// specs carry the configured proxy name (render hint only, no URL)
+credentialMap = { OPENROUTER_API_KEY: 'sk-or' };
+handler = mount({ proxies: { home: 'http://127.0.0.1:7890' }, catalog: { openrouter: { proxy: 'home' } } });
+specs = await handler('specs', null, undefined);
+check('A: specs carries configured proxy name', specs.value.rows.find((r) => r.id === 'openrouter')?.proxy === 'home');
+check('A: specs default proxy is null', specs.value.rows.every((r) => r.proxy === null || typeof r.proxy === 'string'));
+
 // catalog override: label + proxy reference; auto off disables probing
 handler = mount({ auto: false, catalog: { openrouter: { label: 'OR' } }, providers: [] });
 specs = await handler('specs', null, undefined);
@@ -244,8 +251,6 @@ handler = mount({
 	]
 });
 fetchAll = await handler('fetch-all', null, undefined);
-proxy.close();
-upstream.close();
 check('A: proxied http GET uses absolute URI', seenProxied.length === 1 && seenProxied[0].includes(`http://127.0.0.1:${upstreamPort}/user/balance`));
 check('A: proxied row normalized', (() => {
 	const row = fetchAll.value.rows.find((r) => r.id === 'via-proxy');
@@ -255,6 +260,27 @@ check('A: refused CONNECT surfaces per-row error', (() => {
 	const row = fetchAll.value.rows.find((r) => r.id === 'connect-refused');
 	return row && typeof row.error === 'string' && row.error.includes('proxy CONNECT failed: HTTP 403');
 })());
+
+// client-supplied proxy override (settings panel) wins over profile config
+seenProxied.length = 0;
+handler = mount({
+	providers: [
+		{ id: 'client-proxy', label: 'ClientProxy', credential: 'LOCAL_KEY', endpoint: `http://127.0.0.1:${upstreamPort}/user/balance`, format: 'deepseek-balance' }
+	]
+});
+fetchAll = await handler('fetch-all', { proxy: { 'client-proxy': `http://127.0.0.1:${proxyPort}` } }, undefined);
+check('A: client proxy override routes via proxy', seenProxied.length === 1 && seenProxied[0].includes('/user/balance'));
+check('A: client proxy override row ok', (() => {
+	const row = fetchAll.value.rows[0];
+	return row && row.view?.amount === 12.34 && row.error === undefined;
+})());
+fetchAll = await handler('fetch-all', { proxy: { 'client-proxy': 'socks5://127.0.0.1:1080' } }, undefined);
+check('A: invalid client proxy -> row error', (() => {
+	const row = fetchAll.value.rows[0];
+	return row && typeof row.error === 'string' && row.error.includes('client proxy');
+})());
+proxy.close();
+upstream.close();
 
 // ---------- A5: Config schema ----------
 check('A: Config defaults', (() => {
@@ -333,6 +359,9 @@ const surface = {
 	'settings: provider visibility': clientSource.includes('显示供应商'),
 	'settings: refresh interval': clientSource.includes('刷新间隔') && clientSource.includes('跟随配置'),
 	'settings: warn thresholds': clientSource.includes('预警阈值'),
+	'settings: proxy section': clientSource.includes('"代理"') && clientSource.includes('setProxy'),
+	'fetch-all payload carries proxy': clientSource.includes('"fetch-all", { proxy: proxyPayload }'),
+	'reset clears proxy': clientSource.includes('proxy: {}'),
 	'settings: reset button': clientSource.includes('恢复默认'),
 	'settings persist localStorage': clientSource.includes('localStorage') && clientSource.includes('dsh-quota-panel:settings'),
 	'pointer-events opt-in (overlay)': clientSource.includes('pointer-events:auto'),
