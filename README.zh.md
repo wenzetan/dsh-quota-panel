@@ -64,9 +64,15 @@ v0.4 起为**双面包插件**（dual-face）：
 ## 安装
 
 ```sh
-dsh plugin --profile web add "github:brittanistrehlowll-oss/dsh-quota-panel"
+# 跟踪 main（每次安装取最新提交）
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
+# 或锁定到自动打出的版本 tag（见 .github/workflows/tag-release.yml）
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.4.0"
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
 ```
+
+安装后建议刷新一次浏览器页面。零 npm 依赖（schema 库已 vendor），无需
+`allowBuilds` 构建授权。
 
 包声明了 `dsh.bundle.patch`（宿主半自动激活为 profile 层）和 `dsh.client`
 manifest（浏览器半自动进入 `__DSH_BOOT__` 模块图，`immediately: true` 随壳预取）。

@@ -73,9 +73,15 @@ Full page, collapsed capsule (light / dark):
 ## Install
 
 ```sh
-dsh plugin --profile web add "github:brittanistrehlowll-oss/dsh-quota-panel"
+# Track main (resolves to the latest commit on install)
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
+# Or pin to an auto-tagged release (see .github/workflows/tag-release.yml)
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.4.0"
 # restart `dsh web` (bundle layers and the client module graph apply at boot)
 ```
+
+Refresh the browser page once after installing. Zero npm dependencies (the
+schema library is vendored), so no `allowBuilds` authorization is needed.
 
 The package declares `dsh.bundle.patch` (host half activates as a profile
 layer automatically) and a `dsh.client` manifest (client half enters the
