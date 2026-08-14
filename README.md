@@ -1,5 +1,7 @@
 # dsh-quota-panel
 
+English | [中文](README.zh.md)
+
 Provider quota / balance corner panel for the **dsh web surface** (DeepSeek Harness).
 
 A zero-dependency host plugin: for every configured provider it registers one
@@ -9,6 +11,16 @@ bottom-right panel into the served page that fetches the routes and renders one
 row per provider. Rows auto-refresh every 60s and on click; hover shows detail
 (windows, resets, granted vs topped-up), and colors flag low balance or high
 usage.
+
+## Screenshots
+
+Panel close-up:
+
+![Panel](docs/panel.png)
+
+Full page (panel in the bottom-right corner):
+
+![Full page](docs/screenshot.png)
 
 ## Install
 

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>dsh-quota-panel demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14161c; }
+  body { font-family: system-ui, sans-serif; color: #c9d1d9; }
+  .chrome { display: flex; height: 100vh; }
+  .sidebar { width: 220px; background: #101218; border-right: 1px solid #23262e; padding: 12px; }
+  .brand { font-size: 13px; font-weight: 700; color: #e6edf3; margin-bottom: 14px; }
+  .nav { font-size: 12px; line-height: 2.2; color: #8b949e; }
+  .main { flex: 1; display: flex; flex-direction: column; }
+  .chat { flex: 1; padding: 24px; overflow: hidden; }
+  .msg { max-width: 640px; margin: 0 auto 14px; font-size: 13px; line-height: 1.6; }
+  .msg .who { font-weight: 700; color: #7ee787; margin-bottom: 4px; }
+  .msg p { margin: 4px 0; color: #b8c0c8; }
+  .composer { border-top: 1px solid #23262e; padding: 12px 24px; }
+  .box { max-width: 640px; margin: 0 auto; background: #1a1d25; border: 1px solid #2b2f3a; border-radius: 10px; padding: 10px 14px; color: #7d8590; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="chrome">
+  <div class="sidebar">
+    <div class="brand">DeepSeek Harness</div>
+    <div class="nav">新会话<br/>会话历史<br/>工作区<br/>设置</div>
+  </div>
+  <div class="main">
+    <div class="chat">
+      <div class="msg"><div class="who">助手</div><p>你好！我是运行在 DeepSeek Harness 里的编程智能体。</p></div>
+      <div class="msg"><div class="who">用户</div><p>帮我看看账户余额和用量。</p></div>
+      <div class="msg"><div class="who">助手</div><p>好的，右下角面板实时显示各提供方的配额情况。</p></div>
+    </div>
+    <div class="composer"><div class="box">输入消息…</div></div>
+  </div>
+</div>
+<script>
+window.fetch = function (url) {
+  var data;
+  if (String(url).indexOf('deepseek') >= 0) {
+    data = { is_available: true, balance_infos: [{ currency: 'CNY', total_balance: '15.63', granted_balance: '0.00', topped_up_balance: '15.63' }] };
+  } else {
+    data = { usage: {
+      rolling: { status: 'ok', percent: 12, resetsAt: new Date(Date.now() + 4 * 3600e3).toISOString() },
+      weekly:  { status: 'ok', percent: 43, resetsAt: new Date(Date.now() + 2 * 86400e3).toISOString() },
+      monthly: { status: 'ok', percent: 21, resetsAt: new Date(Date.now() + 27 * 86400e3).toISOString() }
+    } };
+  }
+  return Promise.resolve({ json: function () { return Promise.resolve(data); } });
+};
+</script>
+<script>(function () {
+  var AUTO_MS = 60000;
+  var ROWS = [{"id":"deepseek","label":"DS 余额","format":"deepseek-balance","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"lowBalance":5},{"id":"opencode-go","label":"OC Go","format":"opencode-usage","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"lowBalance":5}];
+  var panelId = 'dsh-quota-panel';
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function fmtReset(iso) {
+    var ms = new Date(iso).getTime() - Date.now();
+    if (!isFinite(ms) || ms <= 0) return '\u5373\u5C06\u91CD\u7F6E';
+    var s = Math.floor(ms / 1000);
+    var d = Math.floor(s / 86400); s -= d * 86400;
+    var h = Math.floor(s / 3600); s -= h * 3600;
+    var m = Math.round(s / 60);
+    if (m === 60) { h += 1; m = 0; }
+    if (h === 24) { d += 1; h = 0; }
+    var parts = [];
+    if (d) parts.push(d + '\u5929');
+    if (h) parts.push(h + '\u5C0F\u65F6');
+    if (m) parts.push(m + '\u5206');
+    return parts.length ? parts.join('') : '\u5373\u5C06\u91CD\u7F6E';
+  }
+
+  function renderDeepSeek(row, spec, data) {
+    var info = data && data.balance_infos && data.balance_infos[0];
+    if (!data || data.error || !info) {
+      row.textContent = spec.label + ': \uFF1F';
+      row.title = data && data.error ? String(data.error) : 'no balance info';
+      row.classList.add('err');
+      return;
+    }
+    var total = Number(info.total_balance);
+    row.textContent = spec.label + ': \u00A5' + total.toFixed(2);
+    row.title = 'currency: ' + info.currency + ' | granted: \u00A5' + info.granted_balance + ' | topped-up: \u00A5' + info.topped_up_balance;
+    row.classList.toggle('warn', total < spec.lowBalance);
+  }
+
+  function renderUsage(row, spec, data) {
+    var u = data && data.usage;
+    if (!data || data.error || !u || !u.rolling || !u.weekly || !u.monthly) {
+      row.textContent = spec.label + ': \uFF1F';
+      row.title = data && data.error ? String(data.error) : 'usage unavailable';
+      row.classList.add('err');
+      return;
+    }
+    var l = spec.windowLabels;
+    var r = u.rolling, w = u.weekly, m = u.monthly;
+    row.textContent = spec.label + ': ' + l.rolling + ' ' + r.percent + '% \u00B7 ' + l.weekly + ' ' + w.percent + '% \u00B7 ' + l.monthly + ' ' + m.percent + '%';
+    row.title = 'rolling: ' + r.percent + '% (\u91CD\u7F6E\u4E8E ' + fmtReset(r.resetsAt) + ')\nweekly: ' + w.percent + '% (\u91CD\u7F6E\u4E8E ' + fmtReset(w.resetsAt) + ')\nmonthly: ' + m.percent + '% (\u91CD\u7F6E\u4E8E ' + fmtReset(m.resetsAt) + ')';
+    var high = Math.max(r.percent || 0, w.percent || 0, m.percent || 0);
+    row.classList.toggle('warn', high >= spec.warnPercent && high < spec.errorPercent);
+    row.classList.toggle('err', high >= spec.errorPercent);
+  }
+
+  function renderRow(spec, row) {
+    fetch('/api/quota/' + spec.id, { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (spec.format === 'deepseek-balance') renderDeepSeek(row, spec, data);
+        else renderUsage(row, spec, data);
+      })
+      .catch(function (err) {
+        row.textContent = spec.label + ': \u2717';
+        row.title = String(err);
+        row.classList.add('err');
+      });
+  }
+
+  function refresh() {
+    for (var i = 0; i < ROWS.length; i++) {
+      var row = document.getElementById('dsh-row-' + i);
+      if (row) renderRow(ROWS[i], row);
+    }
+  }
+
+  function mount() {
+    if (document.getElementById(panelId)) return;
+    var style = document.createElement('style');
+    style.textContent = '#dsh-quota-panel{position:fixed;right:14px;bottom:14px;z-index:2147483000;display:flex;flex-direction:column;gap:4px;padding:8px 12px;border-radius:12px;background:rgba(18,22,30,.85);color:#7ee787;font:600 12px/1.5 ui-monospace,Consolas,monospace;letter-spacing:.2px;box-shadow:0 2px 12px rgba(0,0,0,.45);border:1px solid rgba(126,231,135,.35);backdrop-filter:blur(4px);cursor:pointer;user-select:none;transition:opacity .2s}';
+    style.textContent += '#dsh-quota-panel:hover{opacity:.75}';
+    style.textContent += '#dsh-quota-panel .warn{color:#ffd28a}';
+    style.textContent += '#dsh-quota-panel .err{color:#ff9f9f}';
+    document.head.appendChild(style);
+    var panel = el('div');
+    panel.id = panelId;
+    for (var i = 0; i < ROWS.length; i++) {
+      var row = el('div', 'row', ROWS[i].label + ': \u2026');
+      row.id = 'dsh-row-' + i;
+      panel.appendChild(row);
+    }
+    panel.addEventListener('click', refresh);
+    document.body.appendChild(panel);
+    refresh();
+    setInterval(refresh, AUTO_MS);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount);
+  } else {
+    mount();
+  }
+})();</script></body>
+</body>
+</html>
