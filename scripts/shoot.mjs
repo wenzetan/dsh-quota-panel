@@ -1,25 +1,37 @@
 // Capture PNG screenshots of the demo pages via Chrome DevTools Protocol.
-// For each theme it captures two states:
+// For each theme it captures three states:
 //   1. collapsed: the minimal capsule (default state)
 //   2. expanded: the full card (after clicking the capsule)
+//   3. settings: the card with the settings panel open (after clicking ⚙)
 // Usage: node scripts/shoot.mjs [light|dark|both]
 import { spawn } from 'node:child_process';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const root = fileURLToPath(new URL('..', import.meta.url));
+const docs = join(root, 'docs');
+const CHROME = process.env.CHROME_BIN
+  || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+    : process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : '/opt/google/chrome/chrome');
+// headless chrome needs a writable HOME for its crashpad handler
+process.env.HOME = process.env.CHROME_HOME || '/tmp/agent-chrome-home';
 const PORT = 9333;
-const USER_DATA = 'D:/deepseek/dsh-quota-panel/.chrome-cdp';
+const USER_DATA = join(root, '.chrome-cdp');
 const SHOTS = {
 	light: {
-		url: 'file:///D:/deepseek/dsh-quota-panel/docs/demo.html',
-		collapsed: 'D:/deepseek/dsh-quota-panel/docs/screenshot-light.png',
-		expanded: 'D:/deepseek/dsh-quota-panel/docs/screenshot-light-expanded.png'
+		url: 'file://' + join(docs, 'demo.html'),
+		collapsed: join(docs, 'screenshot-light.png'),
+		expanded: join(docs, 'screenshot-light-expanded.png'),
+		settings: join(docs, 'screenshot-light-settings.png')
 	},
 	dark: {
-		url: 'file:///D:/deepseek/dsh-quota-panel/docs/demo-dark.html',
-		collapsed: 'D:/deepseek/dsh-quota-panel/docs/screenshot-dark.png',
-		expanded: 'D:/deepseek/dsh-quota-panel/docs/screenshot-dark-expanded.png'
+		url: 'file://' + join(docs, 'demo-dark.html'),
+		collapsed: join(docs, 'screenshot-dark.png'),
+		expanded: join(docs, 'screenshot-dark-expanded.png'),
+		settings: join(docs, 'screenshot-dark-settings.png')
 	}
 };
 const mode = process.argv[2] || 'both';
@@ -30,8 +42,11 @@ await mkdir(USER_DATA, { recursive: true });
 const chrome = spawn(CHROME, [
 	'--headless=new',
 	'--disable-gpu',
+	'--no-sandbox',
 	'--no-first-run',
 	'--no-default-browser-check',
+	'--disable-extensions',
+	'--hide-scrollbars',
 	`--user-data-dir=${USER_DATA}`,
 	`--remote-debugging-port=${PORT}`,
 	'--window-size=1280,800',
@@ -91,6 +106,15 @@ for (const [key, shot] of Object.entries(SHOTS)) {
 	const expanded = await send('Page.captureScreenshot', { format: 'png' });
 	await writeFile(shot.expanded, Buffer.from(expanded.data, 'base64'));
 	console.log('saved (expanded):', shot.expanded);
+
+	// 3. click the gear button to open settings
+	await send('Runtime.evaluate', {
+		expression: "var b = document.querySelector('#dsh-quota-card .dsh-quota-actions button[aria-label=\"打开设置\"]'); b && b.click();"
+	});
+	await sleep(800);
+	const settings = await send('Page.captureScreenshot', { format: 'png' });
+	await writeFile(shot.settings, Buffer.from(settings.data, 'base64'));
+	console.log('saved (settings):', shot.settings);
 }
 
 ws.close();

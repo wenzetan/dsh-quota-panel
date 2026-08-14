@@ -1,0 +1,237 @@
+# CI + release gate for dsh-quota-panel.
+#
+# check: the committed dual-face test suite (host RPC half against
+#         mocked upstreams + real local proxy servers, browser half in
+#         a vm sandbox), then npm pack and prove the tarball is complete
+#         and self-contained. This plugin is zero-dependency by design,
+#         so "self-contained" is stricter than dsh-llm-newapi's check:
+#         the host bundle may import NOTHING but node: builtins and
+#         relative paths, and the client bundle nothing but react
+#         (supplied by the host's browser module loader).
+#
+# boot: real-install gate — install the packed tarball through the dsh
+#         CLI into a fresh DSH_HOME, seed one dummy credential, and
+#         require `dsh web` to boot serving the plugin: the client
+#         bundle must be served and the /dsh-quota-panel RPC channel
+#         must answer a real `specs` call (405 = the SPA fallback, i.e.
+#         the channel never registered). The specs response must list
+#         the explicit patch row AND the catalog row auto-discovered
+#         from the seeded credential — proving the v0.5+ catalog probe
+#         pipeline works end-to-end in a genuine boot.
+#
+# tag:  only after check+boot pass on main, cut the release tag from
+#         package.json and open the GitHub Release with the tarball.
+#         Replaces the old tag-release.yml, which tagged regardless of
+#         CI status.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Dual-face test suite (host RPC + browser client)
+        run: node scripts/test-page-script.mjs
+      - name: Pack distribution tarball
+        run: npm pack
+      - name: Packed tarball is complete and self-contained
+        run: |
+          set -euo pipefail
+          mkdir /tmp/selfcheck && tar -xzf dsh-quota-panel-*.tgz -C /tmp/selfcheck
+          cd /tmp/selfcheck/package
+          # every manifest entry is actually packed
+          for f in \
+            lib/index.js lib/index.d.ts lib/client.js \
+            lib/vendor/schemastery.mjs lib/vendor/cosmokit.js \
+            cordis.patch.yml; do
+            [ -f "$f" ] || { echo "::error::$f missing from the tarball (check the files list in package.json)"; exit 1; }
+          done
+          # zero-dependency contract: no npm specifier may appear at all.
+          # (dsh-llm-newapi allows @deepseek-ai/* seam packages; this
+          # plugin deliberately has none — vendored schema, node stdlib.)
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs'
+            const host = readFileSync('lib/index.js', 'utf8')
+            const client = readFileSync('lib/client.js', 'utf8')
+            const external = (source) =>
+              [...source.matchAll(/from\\s+[\"']([^\"']+)[\"']|require\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)/g)]
+                .map((m) => m[1] ?? m[2])
+                .filter((s) => s && !s.startsWith('.') && !s.startsWith('node:'))
+            const hostExt = [...new Set(external(host))]
+            const clientExt = [...new Set(external(client))].filter((s) => s !== 'react')
+            if (hostExt.length > 0 || clientExt.length > 0) {
+              console.error('zero-dependency violation — host: [' + hostExt + '] client: [' + clientExt + ']');
+              process.exit(1)
+            }
+            console.log('self-contained: host imports node:/relative only; client adds react (host-supplied)')
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dsh-quota-panel-*.tgz
+          if-no-files-found: error
+
+  # Real-boot gate: install the packed tarball through the dsh CLI into a
+  # fresh DSH_HOME and require `dsh web` to boot serving the plugin.
+  boot:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dsh and pnpm
+        run: npm install -g @deepseek-ai/dsh pnpm
+      - name: Install the packed tarball into a fresh web profile
+        run: |
+          set -euo pipefail
+          export DSH_HOME="$RUNNER_TEMP/dsh-home"
+          mkdir -p "$DSH_HOME"
+          TARBALL="$(pwd)/$(ls dsh-quota-panel-*.tgz)"
+          dsh plugin --profile web add "$TARBALL"
+          PROFILE="$DSH_HOME/profiles/web/package.json"
+          if [ ! -f "$PROFILE" ]; then
+            echo "::error::dsh plugin add did not scaffold the web profile at $PROFILE"
+            find "$DSH_HOME" -maxdepth 3
+            exit 1
+          fi
+          # Register the bundle row (the documented install step 2), keeping
+          # whatever rows the scaffold already wrote.
+          node -e '
+            const fs = require("node:fs")
+            const path = process.env.DSH_HOME + "/profiles/web/package.json"
+            const pkg = JSON.parse(fs.readFileSync(path, "utf8"))
+            pkg.dsh ??= {}
+            pkg.dsh.profile ??= {}
+            pkg.dsh.profile.bundles ??= ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]
+            for (const row of ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-quota-panel"]) {
+              if (!pkg.dsh.profile.bundles.includes(row)) pkg.dsh.profile.bundles.push(row)
+            }
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n")
+            console.log("bundles:", pkg.dsh.profile.bundles.join(", "))
+          '
+          # Seed one dummy credential so the catalog auto-discovery has
+          # something to probe (specs only resolves refs — offline).
+          printf 'ZAI_CODING_CN_API_KEY: ci-dummy-key\n' > "$DSH_HOME/.credentials.yaml"
+      - name: dsh web boots and serves the plugin
+        run: |
+          set -euo pipefail
+          export DSH_HOME="$RUNNER_TEMP/dsh-home"
+          LOG="$RUNNER_TEMP/dsh-web.log"
+          dsh web > "$LOG" 2>&1 &
+          WEB_PID=$!
+          trap 'kill "$WEB_PID" 2>/dev/null || true' EXIT
+          code=""
+          for _ in $(seq 1 120); do
+            if ! kill -0 "$WEB_PID" 2>/dev/null; then
+              echo "::error::dsh web exited during startup"
+              cat "$LOG"
+              exit 1
+            fi
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)"
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::dsh web did not become ready on :3080"
+            cat "$LOG"
+            exit 1
+          fi
+          echo "web ready on :3080"
+          # The plugin's browser half is served for the module loader.
+          client="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3080/plugins/dsh-quota-panel/client.js")"
+          if [ "$client" != "200" ]; then
+            echo "::error::client bundle not served (HTTP $client)"
+            cat "$LOG"
+            exit 1
+          fi
+          # The plugin's RPC channel: 405 is the SPA fallback rejecting a
+          # POST, i.e. the channel did not register. Any other answer with
+          # ok:true proves /dsh-quota-panel is live.
+          BODY="$RUNNER_TEMP/specs.json"
+          rpc="$(curl -s -o "$BODY" -w '%{http_code}' -X POST \
+            http://127.0.0.1:3080/dsh-quota-panel/specs \
+            -H 'content-type: application/json' \
+            -d '{"type":"client-request","rpcId":"ci-boot","method":"specs","payload":null}')"
+          if [ "$rpc" = "405" ]; then
+            echo "::error::RPC channel /dsh-quota-panel missing (405) — the channel did not register"
+            cat "$LOG"
+            exit 1
+          fi
+          if [ "$rpc" != "200" ]; then
+            echo "::error::specs RPC answered HTTP $rpc"
+            cat "$LOG"; cat "$BODY" 2>/dev/null || true
+            exit 1
+          fi
+          # Functional assertions on the real specs response:
+          #   * ok:true — the handler answered, not a fallback page
+          #   * "deepseek" — the explicit row from cordis.patch.yml
+          #   * "zai-coding-cn" — catalog auto-discovery probed the seeded
+          #     credential and mounted the row (the v0.6 coding-plan path)
+          for needle in '"ok":true' '"deepseek"' '"zai-coding-cn"'; do
+            if ! grep -qF "$needle" "$BODY"; then
+              echo "::error::specs response missing $needle";
+              cat "$BODY"
+              exit 1
+            fi
+          done
+          echo "boot gate passed: web ready, client HTTP $client, specs HTTP $rpc, rows discovered"
+
+  # Auto-tag from main — only when check + boot both passed (replaces
+  # tag-release.yml, which tagged without any validation).
+  tag:
+    needs: [check, boot]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: tag-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+      - name: Resolve version from package.json
+        id: ver
+        run: echo "version=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Check whether the tag already exists
+        id: check
+        run: |
+          git fetch --tags origin
+          if git rev-parse -q --verify "refs/tags/${{ steps.ver.outputs.version }}" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create and push the tag
+        if: steps.check.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.ver.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+      - name: Create the GitHub release with the built tarball
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.version }}
+        run: gh release create "$TAG" --title "$TAG" --generate-notes dsh-quota-panel-*.tgz

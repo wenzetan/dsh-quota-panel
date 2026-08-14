@@ -70,10 +70,22 @@ window.fetch = function (url) {
   var data;
   if (String(url).indexOf('deepseek') >= 0) {
     data = { is_available: true, balance_infos: [{ currency: 'CNY', total_balance: '58.36', granted_balance: '0.00', topped_up_balance: '58.36' }] };
+  } else if (String(url).indexOf('zhipu') >= 0) {
+    data = { info: { text: '已用配额 12.5 万 tokens / 100 万（今日 08:00 重置）', title: 'quota limit: 1000000 tokens' } };
+  } else if (String(url).indexOf('zai-coding-cn') >= 0) {
+    data = { usage: {
+      rolling: { percent: 64, resetsAt: new Date(Date.now() + 2.5 * 3600e3).toISOString() },
+      monthly: { percent: 3, resetsAt: new Date(Date.now() + 2.5 * 3600e3).toISOString() }
+    } };
+  } else if (String(url).indexOf('kimi-coding') >= 0) {
+    data = { usage: {
+      rolling: { percent: 70, resetsAt: new Date(Date.now() + 3 * 3600e3).toISOString() },
+      weekly: { percent: 10, resetsAt: new Date(Date.now() + 2 * 86400e3).toISOString() }
+    } };
   } else {
     data = { usage: {
       rolling: { status: 'ok', percent: 10, resetsAt: new Date(Date.now() + 4 * 3600e3).toISOString() },
-      weekly:  { status: 'ok', percent: 45, resetsAt: new Date(Date.now() + 2 * 86400e3).toISOString() },
+      weekly:  { status: 'warn', percent: 72, resetsAt: new Date(Date.now() + 2 * 86400e3).toISOString() },
       monthly: { status: 'ok', percent: 22, resetsAt: new Date(Date.now() + 27 * 86400e3).toISOString() }
     } };
   }
@@ -82,7 +94,7 @@ window.fetch = function (url) {
 </script>
 <script>(function () {
   var AUTO_MS = 60000;
-  var ROWS = [{"id":"deepseek","label":"DeepSeek","format":"deepseek-balance","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}},{"id":"opencode-go","label":"OpenCode Go","format":"opencode-usage","windowLabels":{"rolling":"五","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}}];
+  var ROWS = [{"id":"deepseek","label":"DeepSeek","format":"deepseek-balance","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}},{"id":"opencode-go","label":"OpenCode Go","format":"opencode-usage","windowLabels":{"rolling":"五","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}},{"id":"zhipu","label":"智谱 GLM","format":"zhipu-quota","kind":"info","windowLabels":{"rolling":"滚","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90,"balanceTiers":{"critical":10,"warn":20,"healthy":50}},{"id":"zai-coding-cn","label":"智谱 GLM Coding","kind":"usage","windowLabels":{"rolling":"5h","weekly":"周","monthly":"搜索"},"warnPercent":70,"errorPercent":90},{"id":"kimi-coding","label":"Kimi Coding","kind":"usage","windowLabels":{"rolling":"5h","weekly":"周","monthly":"月"},"warnPercent":70,"errorPercent":90}];
   var panelId = 'dsh-quota-panel';
   var capsuleId = 'dsh-quota-capsule';
   var cardId = 'dsh-quota-card';
@@ -93,7 +105,10 @@ window.fetch = function (url) {
   var capsuleEl = null;
   var cardEl = null;
   var refreshBtn = null;
+  var settingsBtn = null;
+  var settingsEl = null;
   var refreshing = false;
+  var settingsOpen = false;
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -148,6 +163,86 @@ window.fetch = function (url) {
     if (open) refreshAll();
   }
 
+  function setSettingsOpen(open) {
+    settingsOpen = open;
+    if (settingsBtn) {
+      settingsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      settingsBtn.setAttribute('aria-label', open ? '关闭设置' : '打开设置');
+      settingsBtn.classList.toggle('is-active', open);
+    }
+    settingsEl.hidden = !open;
+  }
+
+  function renderSettings() {
+    var root = el('div', 'dsh-quota-settings');
+    // 显示供应商
+    var vis = el('div', 'dsh-setting-section');
+    vis.appendChild(el('div', 'dsh-setting-title', '显示供应商'));
+    for (var i = 0; i < ROWS.length; i++) {
+      var spec = ROWS[i];
+      var row = el('div', 'dsh-setting-row');
+      row.appendChild(el('span', 'dsh-setting-name', spec.label));
+      var box = el('input', 'dsh-setting-check');
+      box.type = 'checkbox';
+      box.checked = true;
+      row.appendChild(box);
+      vis.appendChild(row);
+    }
+    root.appendChild(vis);
+    // 刷新间隔
+    var ref = el('div', 'dsh-setting-section');
+    ref.appendChild(el('div', 'dsh-setting-title', '刷新间隔'));
+    var refRow = el('div', 'dsh-setting-row');
+    refRow.appendChild(el('span', 'dsh-setting-name', '自动刷新'));
+    var sel = el('select', 'dsh-setting-select');
+    ['跟随配置（60 秒）', '15 秒', '30 秒', '1 分钟', '2 分钟', '5 分钟'].forEach(function (label, i) {
+      var opt = el('option', '', label);
+      if (i === 0) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    refRow.appendChild(sel);
+    ref.appendChild(refRow);
+    root.appendChild(ref);
+    // 代理
+    var proxy = el('div', 'dsh-setting-section');
+    proxy.appendChild(el('div', 'dsh-setting-title', '代理'));
+    var hint = el('div', 'dsh-setting-hint', '填写 http(s) 代理 URL，仅该供应商经此代理查询');
+    hint.style.marginBottom = '4px';
+    proxy.appendChild(hint);
+    for (var j = 0; j < ROWS.length; j++) {
+      var pRow = el('div', 'dsh-setting-row');
+      pRow.appendChild(el('span', 'dsh-setting-name', ROWS[j].label));
+      var input = el('input', 'dsh-setting-input dsh-setting-proxy');
+      input.type = 'text';
+      input.placeholder = 'http://127.0.0.1:7890（留空直连）';
+      pRow.appendChild(input);
+      proxy.appendChild(pRow);
+    }
+    root.appendChild(proxy);
+    // 预警阈值
+    var warn = el('div', 'dsh-setting-section');
+    warn.appendChild(el('div', 'dsh-setting-title', '预警阈值'));
+    for (var k = 0; k < ROWS.length; k++) {
+      var spec2 = ROWS[k];
+      var wRow = el('div', 'dsh-setting-row');
+      var isUsage = spec2.format === 'opencode-usage';
+      wRow.appendChild(el('span', 'dsh-setting-name', spec2.label + (isUsage ? '（%）' : '（¥）')));
+      var wInput = el('input', 'dsh-setting-input');
+      wInput.type = 'number';
+      wInput.min = '0';
+      wInput.placeholder = isUsage ? '预警 %（默认 70）' : '预警 ¥（默认 20）';
+      wRow.appendChild(wInput);
+      warn.appendChild(wRow);
+    }
+    root.appendChild(warn);
+    // 底部
+    var foot = el('div', 'dsh-setting-actions');
+    foot.appendChild(el('span', 'dsh-setting-hint', '设置仅保存在本浏览器'));
+    foot.appendChild(el('button', 'dsh-setting-reset', '恢复默认'));
+    root.appendChild(foot);
+    return root;
+  }
+
   function createProviderView(spec) {
     var root = el('div', 'dsh-provider state-loading');
     var main = el('div', 'dsh-provider-main');
@@ -161,6 +256,8 @@ window.fetch = function (url) {
     if (spec.format === 'deepseek-balance') {
       value = el('span', 'dsh-provider-value', '—');
       head.appendChild(value);
+      sub = el('div', 'dsh-provider-sub', '正在更新…');
+    } else if (spec.kind === 'info') {
       sub = el('div', 'dsh-provider-sub', '正在更新…');
     } else {
       usage = el('div', 'dsh-usage-values', '正在更新…');
@@ -226,24 +323,33 @@ window.fetch = function (url) {
 
   function renderUsage(view, spec, data) {
     var u = data && data.usage;
-    if (!data || data.error || !u || !u.rolling || !u.weekly || !u.monthly) {
+    var error = function (message) {
       setState(view, 'error');
       view.usage.textContent = '暂时无法获取用量';
       view.progress.style.width = '0%';
       view.caption.textContent = '';
-      view.root.title = data && data.error ? String(data.error) : 'usage unavailable';
+      view.root.title = message;
       STATE[spec.id] = { status: 'error', summary: '—' };
       renderCapsule();
+    };
+    if (!data || data.error || !u) {
+      error(data && data.error ? String(data.error) : 'usage unavailable');
       return;
     }
-    var r = u.rolling, w = u.weekly, m = u.monthly;
-    var rp = Number(r.percent) || 0;
-    var wp = Number(w.percent) || 0;
-    var mp = Number(m.percent) || 0;
-    var high = Math.max(rp, wp, mp);
+    var winPct = function (win) {
+      return win && typeof win.percent === 'number' && isFinite(win.percent) ? win.percent : null;
+    };
+    var rp = winPct(u.rolling), wp = winPct(u.weekly), mp = winPct(u.monthly);
+    var present = [rp, wp, mp].filter(function (v) { return v !== null; });
+    if (!present.length) {
+      error('usage windows missing');
+      return;
+    }
+    var high = Math.max.apply(null, present);
     var labels = spec.windowLabels || { rolling: '滚', weekly: '周', monthly: '月' };
+    var fmtWin = function (label, v) { return label + ' ' + (v === null ? '—' : v + '%'); };
 
-    view.usage.textContent = labels.rolling + ' ' + rp + '%' + ' · ' + labels.weekly + ' ' + wp + '%' + ' · ' + labels.monthly + ' ' + mp + '%';
+    view.usage.textContent = fmtWin(labels.rolling, rp) + ' · ' + fmtWin(labels.weekly, wp) + ' · ' + fmtWin(labels.monthly, mp);
     view.progress.style.width = Math.min(Math.max(high, 0), 100) + '%';
     view.caption.textContent = '当前最高占用 ' + high + '%';
 
@@ -253,8 +359,29 @@ window.fetch = function (url) {
     else status = 'ok';
     setState(view, status);
 
-    view.root.title = 'rolling: ' + rp + '%（重置于 ' + fmtReset(r.resetsAt) + '）' + '\nweekly: ' + wp + '%（重置于 ' + fmtReset(w.resetsAt) + '）' + '\nmonthly: ' + mp + '%（重置于 ' + fmtReset(m.resetsAt) + '）';
+    var titleLine = function (label, v, win) {
+      return label + ': ' + (v === null ? '无数据' : v + '%（重置于 ' + fmtReset(win && win.resetsAt) + '）');
+    };
+    view.root.title = titleLine(labels.rolling, rp, u.rolling) + '\n' + titleLine(labels.weekly, wp, u.weekly) + '\n' + titleLine(labels.monthly, mp, u.monthly);
     STATE[spec.id] = { status: status, summary: high + '%' };
+    renderCapsule();
+  }
+
+  function renderInfo(view, spec, data) {
+    var info = data && data.info;
+    if (!data || data.error || !info || !info.text) {
+      setState(view, 'error');
+      view.sub.textContent = '暂时无法获取配额';
+      view.root.title = data && data.error ? String(data.error) : 'no info';
+      STATE[spec.id] = { status: 'error', summary: '—' };
+      renderCapsule();
+      return;
+    }
+    var text = String(info.text);
+    setState(view, 'info');
+    view.sub.textContent = text;
+    view.root.title = info.title ? String(info.title) : '';
+    STATE[spec.id] = { status: 'info', summary: text.length > 12 ? text.slice(0, 12) + '…' : text };
     renderCapsule();
   }
 
@@ -317,7 +444,20 @@ window.fetch = function (url) {
       '#dsh-quota-card .dsh-progress-fill{height:100%;width:0;border-radius:inherit;background:var(--dsw-static-deepseek-500,#4176e6);transition:width 300ms ease,background-color 160ms ease}',
       '#dsh-quota-card .state-warn .dsh-progress-fill{background:var(--dsw-static-amber-500,#f59e0b)}',
       '#dsh-quota-card .state-error .dsh-progress-fill{background:var(--dsw-static-red-500,#ef4444)}',
-      '#dsh-quota-card .dsh-usage-caption{margin-top:8px;color:var(--dsw-alias-label-secondary,#61666b);font-size:12px;line-height:18px}'
+      '#dsh-quota-card .dsh-usage-caption{margin-top:8px;color:var(--dsw-alias-label-secondary,#61666b);font-size:12px;line-height:18px}',
+      '#dsh-quota-card .state-info .dsh-status-dot{background:var(--dsw-static-deepseek-500,#4176e6)}',
+      '#dsh-quota-card .dsh-setting-section{margin-bottom:12px}',
+      '#dsh-quota-card .dsh-setting-title{margin-bottom:6px;color:var(--dsw-alias-label-primary,#1b1b1c);font-size:12px;font-weight:600;line-height:18px}',
+      '#dsh-quota-card .dsh-setting-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0;color:var(--dsw-alias-label-primary,#1b1b1c);font-size:13px;line-height:20px}',
+      '#dsh-quota-card .dsh-setting-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '#dsh-quota-card .dsh-setting-input,#dsh-quota-card .dsh-setting-select{width:104px;padding:3px 8px;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.14));border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#1b1b1c);font:inherit;font-size:12px;line-height:18px;box-sizing:border-box}',
+      '#dsh-quota-card .dsh-setting-input:focus,#dsh-quota-card .dsh-setting-select:focus{outline:none;border-color:var(--dsw-static-deepseek-500,#4176e6)}',
+      '#dsh-quota-card .dsh-setting-check{flex:none;accent-color:var(--dsw-static-deepseek-500,#4176e6)}',
+      '#dsh-quota-card .dsh-setting-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.06))}',
+      '#dsh-quota-card .dsh-setting-hint{color:var(--dsw-alias-label-tertiary,#818590);font-size:11px;line-height:16px}',
+      '#dsh-quota-card .dsh-setting-reset{padding:3px 10px;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.14));border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#61666b);font:inherit;font-size:12px;line-height:18px;cursor:pointer;transition:color 120ms ease,background-color 120ms ease}',
+      '#dsh-quota-card .dsh-setting-proxy{width:150px}',
+      '#dsh-quota-card .dsh-setting-reset:hover{color:var(--dsw-alias-label-primary,#1b1b1c);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}'
     ].join('\n');
     var style = el('style');
     style.textContent = css;
@@ -358,11 +498,17 @@ window.fetch = function (url) {
     refreshBtn.type = 'button';
     refreshBtn.setAttribute('aria-label', '刷新模型额度');
     refreshBtn.addEventListener('click', function () { refreshAll(); });
+    var settingsBtn = el('button', 'dsh-quota-icon', '⚙');
+    settingsBtn.type = 'button';
+    settingsBtn.setAttribute('aria-label', '打开设置');
+    settingsBtn.setAttribute('aria-expanded', 'false');
+    settingsBtn.addEventListener('click', function () { setSettingsOpen(!settingsOpen); });
     var collapseBtn = el('button', 'dsh-quota-icon', '▴');
     collapseBtn.type = 'button';
     collapseBtn.setAttribute('aria-label', '收起模型额度');
     collapseBtn.addEventListener('click', function () { setExpanded(false); });
     actions.appendChild(refreshBtn);
+    actions.appendChild(settingsBtn);
     actions.appendChild(collapseBtn);
     header.appendChild(actions);
     cardEl.appendChild(header);
@@ -372,6 +518,9 @@ window.fetch = function (url) {
       VIEWS[ROWS[i].id] = view;
       cardEl.appendChild(view.root);
     }
+    settingsEl = renderSettings();
+    settingsEl.hidden = true;
+    cardEl.appendChild(settingsEl);
     panel.appendChild(cardEl);
     return panel;
   }
@@ -383,6 +532,7 @@ window.fetch = function (url) {
       var response = await fetch('/api/quota/' + encodeURIComponent(spec.id), { cache: 'no-store' });
       var data = await response.json();
       if (spec.format === 'deepseek-balance') renderDeepSeek(view, spec, data);
+      else if (spec.kind === 'info') renderInfo(view, spec, data);
       else renderUsage(view, spec, data);
     } catch (error) {
       renderProviderError(view, spec, error);

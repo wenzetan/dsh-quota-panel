@@ -144,6 +144,60 @@ check('A: zhipu limits -> info view', (() => {
 	return row && row.view?.kind === 'info' && row.view.text === '5/100 · 2/10';
 })());
 
+// ---------- A2b: coding plan catalog (zai / kimi / minimax) ----------
+credentialMap = { ZAI_CODING_CN_API_KEY: 'sk-zai-cn', ZAI_API_KEY: 'sk-zai', KIMI_API_KEY: 'sk-kimi', MINIMAX_CN_API_KEY: 'sk-mmcn', ZHIPU_API_KEY: 'sk-zp' };
+handler = mount({});
+specs = await handler('specs', null, undefined);
+check('A: coding plan rows discovered', (() => {
+	const ids = specs.value.rows.map((r) => r.id);
+	return ids.includes('zai-coding-cn') && ids.includes('zai') && ids.includes('kimi-coding') && ids.includes('minimax-cn') && !ids.includes('minimax');
+})());
+check('A: coding plan kinds and window labels', (() => {
+	const zc = specs.value.rows.find((r) => r.id === 'zai-coding-cn');
+	const km = specs.value.rows.find((r) => r.id === 'kimi-coding');
+	return zc.kind === 'usage' && zc.windowLabels?.rolling === '5h' && zc.windowLabels?.monthly === '搜索'
+		&& km.kind === 'usage' && km.windowLabels?.rolling === '5h' && km.windowLabels?.monthly === '月';
+})());
+globalThis.fetch = async (url) => {
+	const s = String(url);
+	if (s.includes('bigmodel') || s.includes('api.z.ai')) {
+		return { ok: true, status: 200, json: async () => ({ code: 200, success: true, data: { level: 'pro', limits: [
+			{ type: 'TIME_LIMIT', unit: 5, number: 1, usage: 1000, currentValue: 31, remaining: 969, percentage: 3, nextResetTime: 1893456000000 },
+			{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 64, nextResetTime: 1893456000000 }
+		] } }) };
+	}
+	if (s.includes('api.kimi.com')) {
+		return { ok: true, status: 200, json: async () => ({ usage: { limit: '2048', used: '214', remaining: '1834', resetTime: '2026-01-09T15:23:13.716839Z' }, limits: [{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '200', used: '139', remaining: '61', resetTime: '2026-01-06T13:33:02.717Z' } }] }) };
+	}
+	if (s.includes('minimaxi')) {
+		return { ok: true, status: 200, json: async () => ({ base_resp: { status_code: 0, status_msg: '' }, current_subscribe_title: 'MiniMax Coding', model_remains: [{ model: 'MiniMax-M2.5', current_interval_total_count: 100, current_interval_usage_count: 25, current_interval_remaining_percent: 75, end_time: 1893456000000 }] }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try {
+	fetchAll = await handler('fetch-all', null, undefined);
+} finally {
+	globalThis.fetch = realFetch;
+}
+check('A: zai coding quota -> usage windows', (() => {
+	const row = fetchAll.value.rows.find((r) => r.id === 'zai-coding-cn');
+	const z = fetchAll.value.rows.find((r) => r.id === 'zai');
+	return row && row.view?.kind === 'usage' && row.view.windows?.rolling?.percent === 64 && row.view.windows?.monthly?.percent === 3
+		&& row.view.windows?.weekly === undefined && z.view?.windows?.rolling?.percent === 64;
+})());
+check('A: kimi coding usage windows', (() => {
+	const row = fetchAll.value.rows.find((r) => r.id === 'kimi-coding');
+	return row && row.view?.kind === 'usage' && row.view.windows?.rolling?.percent === 70 && row.view.windows?.weekly?.percent === 10 && row.view.windows?.monthly === undefined;
+})());
+check('A: minimax remains -> usage percent', (() => {
+	const row = fetchAll.value.rows.find((r) => r.id === 'minimax-cn');
+	return row && row.view?.kind === 'usage' && row.view.windows?.rolling?.percent === 25 && typeof row.view.windows?.rolling?.resetsAt === 'string';
+})());
+check('A: zhipu quota percentage fallback', (() => {
+	const row = fetchAll.value.rows.find((r) => r.id === 'zhipu');
+	return row && row.view?.kind === 'info' && row.view.text === '969/1 · 64%';
+})());
+
 // hide drops catalog rows
 handler = mount({ hide: ['zhipu'] });
 specs = await handler('specs', null, undefined);
