@@ -296,7 +296,7 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 # 跟踪 main（每次安装取最新提交）
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
 # 或锁定到自动打出的版本 tag（CI 在 check + boot 通过后打 tag）
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.2"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.3"
 # 配置好仓库 secret NPM_TOKEN 后（见下），也可按包名安装：
 dsh plugin --profile web add dsh-quota-panel
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
@@ -364,6 +364,10 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.7.3** —— 不再显示未配置的供应商行：`cordis.patch.yml` 移除显式
+  示例行（deepseek / opencode-go），设置面板只列出凭据可解析的供应商
+  （自动发现）。CI boot 门禁双向断言：种子的 key 上板，未配置的供应商
+  不上板。
 - **v0.7.2** —— web 端 i18n：面板跟随壳的语言设置（通用设置 → 语言，
   `locale.preference`；中/英）——胶囊、卡片、设置面板、错误文案、
   aria 标签、用量窗口等全部文案以 zh/en 词典形式注册到 `quota-panel`

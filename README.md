@@ -341,7 +341,7 @@ OpenCode usage (`high = max(rolling, weekly, monthly)`):
 # Track main (each install resolves to the latest commit)
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
 # Or pin the auto-tagged release (CI tags after check + boot pass)
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.2"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.3"
 # Once the repo secret NPM_TOKEN is configured (see below), by name:
 dsh plugin --profile web add dsh-quota-panel
 # Restart `dsh web` (bundle layer and client module graph apply at boot)
@@ -420,6 +420,11 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.7.3** — no unconfigured provider rows: `cordis.patch.yml` no longer
+  ships explicit example rows (deepseek / opencode-go), so the settings
+  panel lists exactly the providers whose credential resolves (auto
+  discovery). The CI boot gate now asserts both directions: the seeded key
+  appears, and unconfigured providers do not.
 - **v0.7.2** — web i18n: the panel follows the shell's language setting
   (通用设置 → 语言, `locale.preference`; zh / en) through the
   `ctx.locale` service — all copy (capsule, card, settings panel, errors,

@@ -243,16 +243,22 @@ jobs:
           BODY="$PROBE_BODY"
           # Functional assertions on the real specs response:
           #   * ok:true — the handler answered, not a fallback page
-          #   * "deepseek" — the explicit row from cordis.patch.yml
           #   * "zai-coding-cn" — catalog auto-discovery probed the seeded
           #     credential and mounted the row (the v0.6 coding-plan path)
-          for needle in '"ok":true' '"deepseek"' '"zai-coding-cn"'; do
+          #   * no "deepseek"/"opencode-go" — providers without a configured
+          #     key must NOT appear (cordis.patch.yml ships no explicit rows)
+          for needle in '"ok":true' '"zai-coding-cn"'; do
             if ! grep -qF "$needle" "$BODY"; then
               echo "::error::specs response missing $needle";
               cat "$BODY"
               exit 1
             fi
           done
+          if grep -qF '"deepseek"' "$BODY" || grep -qF '"opencode-go"' "$BODY"; then
+            echo "::error::unconfigured provider row leaked into specs";
+            cat "$BODY"
+            exit 1
+          fi
           echo "boot gate passed: web ready, client HTTP $client, specs HTTP $rpc, rows discovered"
 
   # Auto-tag from main — only when check + boot both passed (replaces

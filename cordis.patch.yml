@@ -8,10 +8,12 @@
 # MINIMAX_API_KEY / MINIMAX_CN_API_KEY, STEP_API_KEY / STEPFUN_API_KEY,
 # XAI_API_KEY, ZHIPU_API_KEY / GLM_API_KEY, ZAI_API_KEY /
 # ZAI_CODING_CN_API_KEY, KIMI_API_KEY, OPENCODE_GO_API_KEY) — no patch
-# config needed for those. The keys below
-# are an explicit example: same-id entries replace catalog rows wholesale.
-# Set `auto: false` to list everything by hand, `hide: [id...]` to drop
-# single rows, and `catalog: {<id>: {...}}` for partial overrides.
+# config needed for those. This bundle therefore ships NO explicit provider
+# rows: the panel shows exactly the providers whose key resolves. If you
+# want rows outside the catalog, add them to `providers:` below (same-id
+# entries replace catalog rows wholesale). Set `auto: false` to list
+# everything by hand, `hide: [id...]` to drop single rows, and
+# `catalog: {<id>: {...}}` for partial overrides.
 #
 # Providers that cannot be reached directly (e.g. from within mainland
 # China) can route through an HTTP proxy. The primary way is the frontend
@@ -34,24 +36,9 @@
       name: 'dsh-quota-panel'
       config:
         refreshMs: 60000
-        providers:
-          - id: deepseek
-            label: DeepSeek
-            credential: DEEPSEEK_API_KEY
-            endpoint: https://api.deepseek.com/user/balance
-            format: deepseek-balance
-            balanceTiers:
-              critical: 10
-              warn: 20
-              healthy: 50
-          - id: opencode-go
-            label: OpenCode Go
-            credential: OPENCODE_GO_API_KEY
-            endpoint: https://opencode.ai/zen/go/v1/usage
-            format: opencode-usage
-            windowLabels:
-              rolling: 五
-              weekly: 周
-              monthly: 月
-            warnPercent: 70
-            errorPercent: 90
+        # No explicit providers: the built-in catalog auto-discovers every
+        # provider whose standard credential reference resolves, so the panel
+        # shows exactly the providers you configured a key for. Explicit
+        # entries only belong here for providers outside the catalog (see the
+        # README "Explicit providers" section and the comments above).
+        providers: []
