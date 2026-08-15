@@ -297,6 +297,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
+      # A tag pushed with GITHUB_TOKEN does NOT trigger the tags:['v*']
+      # workflow (GitHub's recursion guard), so the release jobs would never
+      # run. Dispatch the release run on the new tag explicitly.
+      - name: Trigger the release run on the new tag
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.version }}
+        run: gh workflow run ci.yml --ref "$TAG"
 
   # ── Release channels ──────────────────────────────────────────────────
   # Both jobs run on the v* tag push (created by the tag job above or by
