@@ -106,6 +106,24 @@ Settings panel (⚙), dark theme:
   slot only (bottom-right corner), not in sidebars, headers, or the status
   bar.
 
+### Requesting a new provider
+
+Missing a provider? [Open an issue](https://github.com/wenzetan/dsh-quota-panel/issues/new)
+with:
+
+1. **the provider id** you want (`^[a-z0-9-]+$`, e.g. `together`), using a
+   `-cn` suffix for the China site of a dual-site provider
+   (cf. `siliconflow` / `siliconflow-cn`);
+2. **the balance API URL** — a public endpoint that answers the provider's
+   standard API key with remaining balance/quota (e.g.
+   `GET https://api.provider.com/v1/user/info`, Bearer auth), plus the
+   response shape if you can paste it.
+
+That is all the catalog needs: an id whose standard credential reference
+resolves, an endpoint, and a format adapter for the response. Providers with
+only cookie/CLI quota pages (see above) cannot be supported until they expose
+an API-key endpoint.
+
 ## How it works
 
 ```
@@ -119,7 +137,7 @@ Settings panel (⚙), dark theme:
                │   fetch-all { proxy: {rowId: url} } → normalized views
 ┌──────────────▼────────────── host (lib/index.js) ──────┐
 │  ctx.credentials → API keys (never leave the host)      │
-│  catalog probe → auto discovery (13 built-in providers) │
+│  catalog probe → auto discovery (14 built-in providers) │
 │  per-row fetch → proxy engine (CONNECT tunnel /         │
 │                  absolute-URI) → upstream JSON          │
 │  normalization → {balance | usage | info} view models   │
@@ -176,8 +194,9 @@ All keys are optional — the structure and defaults live in the exported
 | `providers` | explicit rows; a same-id entry replaces the catalog row wholesale | `[]` |
 
 Each `catalog` override may set: `label` / `endpoint` / `format` /
-`proxy` / `refs` (credential references to probe, UPPER_SNAKE) /
-`balanceTiers` / `warnPercent` / `errorPercent` / `windowLabels`.
+`proxy` / `refs` (credential references to probe, UPPER_SNAKE) / `currency`
+(balance rows: symbol like `$` or `US$`) / `balanceTiers` / `warnPercent` /
+`errorPercent` / `windowLabels`.
 
 Explicit `providers` fields:
 
@@ -189,6 +208,7 @@ Explicit `providers` fields:
 | `endpoint` | quota JSON endpoint; base URL for `openai-billing` | required |
 | `format` | row adapter (see table below) | `deepseek-balance` |
 | `proxy` | a proxy name defined in `proxies`; absent = direct | — |
+| `currency` | (balance rows) currency symbol, overrides the format default | format default |
 | `balanceTiers` | (balance rows) `{critical, warn, healthy}` | `{10, 20, 50}` |
 | `lowBalance` | legacy alias for `balanceTiers.warn` | — |
 | `windowLabels` | (usage-kind formats) labels for the usage windows | `{滚, 周, 月}` |
@@ -200,7 +220,8 @@ Explicit `providers` fields:
 |---|---|---|---|
 | DeepSeek | `DEEPSEEK_API_KEY` | `api.deepseek.com/user/balance` | ¥ balance |
 | OpenRouter | `OPENROUTER_API_KEY` | `openrouter.ai/api/v1/credits` | $ balance (purchased − used) |
-| SiliconFlow | `SILICONFLOW_API_KEY` | `api.siliconflow.cn/v1/user/info` | ¥ balance |
+| SiliconFlow (global) | `SILICONFLOW_API_KEY` | `api.siliconflow.com/v1/user/info` | $ balance |
+| SiliconFlow (CN) | `SILICONFLOW_CN_API_KEY` | `api.siliconflow.cn/v1/user/info` | ¥ balance |
 | Moonshot / Kimi | `MOONSHOT_API_KEY` | `api.moonshot.cn/v1/users/me/balance` | ¥ balance |
 | MiniMax Coding (global) | `MINIMAX_API_KEY` | `www.minimax.io/v1/token_plan/remains` | 5h prompt usage % |
 | MiniMax Coding (CN) | `MINIMAX_CN_API_KEY` | `api.minimaxi.com/v1/token_plan/remains` | 5h prompt usage % |
@@ -219,13 +240,38 @@ requests `{base}/v1/dashboard/billing/subscription`
 (`total_usage`); remaining = limit − used ($). Aggregator domains differ
 per deployment, so this format is explicit-config only.
 
+### Dual-site provider ids (custom id → site mapping)
+
+Some providers run separate international and China sites with different
+endpoints, credential references and currencies. The catalog models each
+site as its own **provider id**, so configuring the matching key is all it
+takes — and an explicit `providers:` entry reusing one of these ids replaces
+the catalog row wholesale (same fields, your endpoint/label/currency):
+
+| provider id | Site | Endpoint | Credential ref | Currency |
+|---|---|---|---|---|
+| `siliconflow` | SiliconFlow global | `api.siliconflow.com/v1/user/info` | `SILICONFLOW_API_KEY` | `$` |
+| `siliconflow-cn` | SiliconFlow China | `api.siliconflow.cn/v1/user/info` | `SILICONFLOW_CN_API_KEY` | `¥` |
+| `minimax` | MiniMax Coding global | `www.minimax.io/v1/token_plan/remains` | `MINIMAX_API_KEY` | — (usage %) |
+| `minimax-cn` | MiniMax Coding China | `api.minimaxi.com/v1/token_plan/remains` | `MINIMAX_CN_API_KEY` | — (usage %) |
+| `zai` | Z.AI GLM Coding global | `api.z.ai/api/monitor/usage/quota/limit` | `ZAI_API_KEY` | — (usage %) |
+| `zai-coding-cn` | 智谱 GLM Coding China | `open.bigmodel.cn/api/monitor/usage/quota/limit` | `ZAI_CODING_CN_API_KEY` | — (usage %) |
+
+Both sites of one provider can be on the panel at the same time (configure
+both keys); `hide: ["siliconflow"]` drops either row individually.
+
+The currency symbol for balance-kind rows comes from the format by default
+(`siliconflow-balance` renders ¥) and can be overridden per row: catalog
+rows carry `currency` (the global SiliconFlow row sets `$`), a `catalog:`
+override may set it, and explicit `providers:` entries accept a `currency`
+field (e.g. `"US$"`).
 ### Built-in formats
 
 | format | Row kind | Upstream response shape |
 |---|---|---|
 | `deepseek-balance` | ¥ balance | `{ balance_infos: [{ currency, total_balance, granted_balance, topped_up_balance }] }` |
 | `openrouter-credits` | $ balance | `{ data: { total_credits, total_usage } }` |
-| `siliconflow-balance` | ¥ balance | `{ data: { balance, chargeBalance, totalUsage } }` |
+| `siliconflow-balance` | balance (¥ by default, per-row currency override) | `{ data: { balance, chargeBalance, totalUsage } }` |
 | `moonshot-balance` | ¥ balance | `{ data: { total_balance } }` |
 | `minimax-remains` | usage % | `{ base_resp, model_remains: [{ current_interval_total_count, current_interval_remaining_percent | …count aliases, end_time }] }` (remaining → used %) |
 | `stepfun-accounts` | ¥ balance | `{ balance, total_cash_balance, total_voucher_balance }` |
@@ -295,7 +341,7 @@ OpenCode usage (`high = max(rolling, weekly, monthly)`):
 # Track main (each install resolves to the latest commit)
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
 # Or pin the auto-tagged release (see .github/workflows/tag-release.yml)
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.0"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.1"
 # Restart `dsh web` (bundle layer and client module graph apply at boot)
 ```
 
@@ -337,6 +383,12 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.7.1** — dual-site SiliconFlow: catalog id `siliconflow` now maps to the
+  global site (`api.siliconflow.com`, `$`), new id `siliconflow-cn` maps to
+  the China site (`api.siliconflow.cn`, `¥`, ref `SILICONFLOW_CN_API_KEY`);
+  balance rows gained a per-row `currency` override (catalog rows, `catalog:`
+  overrides, and explicit `providers:` entries); README documents the
+  dual-site provider id → endpoint/currency mapping.
 - **v0.7.0** — adopted the org TypeScript tool-bundle template (dsh-plugin-check
   compliant, zero waivers): sources moved to `src/*.ts` compiled into `lib/`
   by `npm run build` (tsc + vendored runtime copy), committed artifacts

@@ -144,6 +144,51 @@ check('A: zhipu limits -> info view', (() => {
 	return row && row.view?.kind === 'info' && row.view.text === '5/100 · 2/10';
 })());
 
+
+// ---------- A2c: siliconflow dual-site rows (global $ / cn ¥) ----------
+credentialMap = { SILICONFLOW_API_KEY: 'sk-sf', SILICONFLOW_CN_API_KEY: 'sk-sfcn' };
+handler = mount({});
+specs = await handler('specs', null, undefined);
+check('A: siliconflow dual-site rows discovered', (() => {
+	const ids = specs.value.rows.map((r) => r.id);
+	return ids.includes('siliconflow') && ids.includes('siliconflow-cn');
+})());
+check('A: siliconflow currencies split ($ global / ¥ cn)', (() => {
+	const sf = specs.value.rows.find((r) => r.id === 'siliconflow');
+	const sfc = specs.value.rows.find((r) => r.id === 'siliconflow-cn');
+	return sf.kind === 'balance' && sf.currency === '$' && sfc.kind === 'balance' && sfc.currency === '¥';
+})());
+const sfHits = [];
+globalThis.fetch = async (url) => {
+	if (String(url).includes('api.siliconflow.com')) {
+		sfHits.push('com');
+		return { ok: true, status: 200, json: async () => ({ data: { balance: '12.34', chargeBalance: '10.00', totalUsage: '5.00' } }) };
+	}
+	if (String(url).includes('api.siliconflow.cn')) {
+		sfHits.push('cn');
+		return { ok: true, status: 200, json: async () => ({ data: { balance: '56.78', chargeBalance: '50.00', totalUsage: '8.00' } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try {
+	fetchAll = await handler('fetch-all', null, undefined);
+} finally {
+	globalThis.fetch = realFetch;
+}
+check('A: siliconflow rows hit their own endpoints', sfHits.includes('com') && sfHits.includes('cn'));
+check('A: siliconflow balances normalized', (() => {
+	const sf = fetchAll.value.rows.find((r) => r.id === 'siliconflow');
+	const sfc = fetchAll.value.rows.find((r) => r.id === 'siliconflow-cn');
+	return sf.view?.kind === 'balance' && sf.view.amount === 12.34 && sfc.view?.kind === 'balance' && sfc.view.amount === 56.78;
+})());
+check('A: catalog currency override key accepted', (() => {
+	try {
+		mount({ catalog: { siliconflow: { currency: 'US$' } } });
+		return true;
+	} catch {
+		return false;
+	}
+})());
 // ---------- A2b: coding plan catalog (zai / kimi / minimax) ----------
 credentialMap = { ZAI_CODING_CN_API_KEY: 'sk-zai-cn', ZAI_API_KEY: 'sk-zai', KIMI_API_KEY: 'sk-kimi', MINIMAX_CN_API_KEY: 'sk-mmcn', ZHIPU_API_KEY: 'sk-zp' };
 handler = mount({});

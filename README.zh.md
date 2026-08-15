@@ -85,6 +85,20 @@ v0.5 起为**双面插件** + **内置供应商目录自动发现**：安装并�
 - **多位置挂载** —— 组件只存在于 `shell.overlay` 槽位（右下角），
   不支持侧边栏、顶栏或状态栏位置。
 
+### 申请新增供应商
+
+缺少你想监控的供应商？欢迎[提 issue](https://github.com/wenzetan/dsh-quota-panel/issues/new)，附上：
+
+1. **provider id**（`^[a-z0-9-]+$`，如 `together`）；双站点供应商的国内站用
+   `-cn` 后缀（参考 `siliconflow` / `siliconflow-cn`）；
+2. **获取余额的 API URL** —— 用该供应商的标准 API key 即可查询剩余
+   余额/额度的公开端点（如 `GET https://api.provider.com/v1/user/info`，
+   Bearer 认证）；能贴一段响应 JSON 结构更好。
+
+目录接入只需要这些：一个标准凭据引用可解析的 id、一个端点、一个响应
+格式适配器。只有 Cookie/CLI 配额页的供应商（见上）在官方提供
+API-key 端点前无法支持。
+
 ## 实现逻辑
 
 ```
@@ -98,7 +112,7 @@ v0.5 起为**双面插件** + **内置供应商目录自动发现**：安装并�
                │   fetch-all { proxy: {rowId: url} } → 归一化视图
 ┌──────────────▼────────────── host (lib/index.js) ──────┐
 │  ctx.credentials → API Key（绝不离开宿主）              │
-│  目录探测 → 自动发现（13 个内置供应商）                 │
+│  目录探测 → 自动发现（14 个内置供应商）                 │
 │  逐行请求 → 代理引擎（CONNECT 隧道 / 绝对 URI）→ 上游 JSON │
 │  归一化 → {balance | usage | info} 视图模型            │
 └─────────────────────────────────────────────────────────┘
@@ -144,8 +158,8 @@ v0.5 起为**双面插件** + **内置供应商目录自动发现**：安装并�
 | `providers` | 显式行；同 id 整体替换目录行 | `[]` |
 
 `catalog` 每项可覆盖：`label` / `endpoint` / `format` / `proxy` / `refs`（探测的
-credential 引用名，UPPER_SNAKE）/ `balanceTiers` / `warnPercent` / `errorPercent` /
-`windowLabels`。
+credential 引用名，UPPER_SNAKE）/ `currency`（余额行：币种符号，如 `$`、`US$`）/
+`balanceTiers` / `warnPercent` / `errorPercent` / `windowLabels`。
 
 显式 `providers` 字段：
 
@@ -157,6 +171,7 @@ credential 引用名，UPPER_SNAKE）/ `balanceTiers` / `warnPercent` / `errorPe
 | `endpoint` | 额度 JSON 接口；`openai-billing` 格式时为聚合站 base URL | 必填 |
 | `format` | 行适配器（见下表） | `deepseek-balance` |
 | `proxy` | `proxies` 中定义的代理名；缺省直连 | — |
+| `currency` | （余额型）币种符号，覆盖 format 默认值 | format 默认 |
 | `balanceTiers` | （余额型）`{critical, warn, healthy}` 分级阈值 | `{10, 20, 50}` |
 | `lowBalance` | 旧版别名，等价于 `balanceTiers.warn` | — |
 | `windowLabels` | （usage 类格式）用量窗口的标签 | `{滚, 周, 月}` |
@@ -168,7 +183,8 @@ credential 引用名，UPPER_SNAKE）/ `balanceTiers` / `warnPercent` / `errorPe
 |---|---|---|---|
 | DeepSeek | `DEEPSEEK_API_KEY` | `api.deepseek.com/user/balance` | ¥余额 |
 | OpenRouter | `OPENROUTER_API_KEY` | `openrouter.ai/api/v1/credits` | $余额（购入 − 已用） |
-| SiliconFlow | `SILICONFLOW_API_KEY` | `api.siliconflow.cn/v1/user/info` | ¥余额 |
+| SiliconFlow（国际） | `SILICONFLOW_API_KEY` | `api.siliconflow.com/v1/user/info` | $余额 |
+| SiliconFlow（国内） | `SILICONFLOW_CN_API_KEY` | `api.siliconflow.cn/v1/user/info` | ¥余额 |
 | Moonshot / Kimi | `MOONSHOT_API_KEY` | `api.moonshot.cn/v1/users/me/balance` | ¥余额 |
 | MiniMax Coding（国际） | `MINIMAX_API_KEY` | `www.minimax.io/v1/token_plan/remains` | 5 小时提示词用量% |
 | MiniMax Coding（国内） | `MINIMAX_CN_API_KEY` | `api.minimaxi.com/v1/token_plan/remains` | 5 小时提示词用量% |
@@ -185,13 +201,36 @@ credential 引用名，UPPER_SNAKE）/ `balanceTiers` / `warnPercent` / `errorPe
 （`hard_limit_usd`）与 `{base}/v1/dashboard/billing/usage`（`total_usage`）；
 剩余 = 上限 − 已用（$）。聚合站域名各不相同，因此只支持显式配置行。
 
+### 双站点 provider id（自定义 id → 站点映射）
+
+部分供应商同时运营国际站与国内站，端点、凭据引用和币种各不相同。
+目录把每个站点建模为独立的 **provider id**：配置对应 key 即自动上板；
+显式 `providers:` 里复用这些 id 之一会整体替换目录行（同样的字段，
+换成你的 endpoint/label/currency）：
+
+| provider id | 站点 | 查询端点 | credential 引用 | 币种 |
+|---|---|---|---|---|
+| `siliconflow` | SiliconFlow 国际 | `api.siliconflow.com/v1/user/info` | `SILICONFLOW_API_KEY` | `$` |
+| `siliconflow-cn` | SiliconFlow 国内 | `api.siliconflow.cn/v1/user/info` | `SILICONFLOW_CN_API_KEY` | `¥` |
+| `minimax` | MiniMax Coding 国际 | `www.minimax.io/v1/token_plan/remains` | `MINIMAX_API_KEY` | —（用量%） |
+| `minimax-cn` | MiniMax Coding 国内 | `api.minimaxi.com/v1/token_plan/remains` | `MINIMAX_CN_API_KEY` | —（用量%） |
+| `zai` | Z.AI GLM Coding 国际 | `api.z.ai/api/monitor/usage/quota/limit` | `ZAI_API_KEY` | —（用量%） |
+| `zai-coding-cn` | 智谱 GLM Coding 国内 | `open.bigmodel.cn/api/monitor/usage/quota/limit` | `ZAI_CODING_CN_API_KEY` | —（用量%） |
+
+同一供应商的两个站点可以同时在板（两个 key 都配置即可）；
+`hide: ["siliconflow"]` 可单独隐藏某一行。
+
+余额行的币种符号默认来自 format（`siliconflow-balance` 默认 ¥），
+可按行覆盖：目录行自带 `currency`（SiliconFlow 国际行设为 `$`），
+`catalog:` 覆盖可设置，显式 `providers:` 条目接受 `currency` 字段
+（如 `"US$"`）。
 ### 内置 format
 
 | format | 行类型 | 上游响应形态 |
 |---|---|---|
 | `deepseek-balance` | ¥余额 | `{ balance_infos: [{ currency, total_balance, granted_balance, topped_up_balance }] }` |
 | `openrouter-credits` | $余额 | `{ data: { total_credits, total_usage } }` |
-| `siliconflow-balance` | ¥余额 | `{ data: { balance, chargeBalance, totalUsage } }` |
+| `siliconflow-balance` | 余额（默认 ¥，可按行覆盖币种） | `{ data: { balance, chargeBalance, totalUsage } }` |
 | `moonshot-balance` | ¥余额 | `{ data: { total_balance } }` |
 | `minimax-remains` | 用量% | `{ base_resp, model_remains: [{ current_interval_total_count, current_interval_remaining_percent 或各计数别名, end_time }] }`（按剩余反推已用%） |
 | `stepfun-accounts` | ¥余额 | `{ balance, total_cash_balance, total_voucher_balance }` |
@@ -257,7 +296,7 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 # 跟踪 main（每次安装取最新提交）
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
 # 或锁定到自动打出的版本 tag（见 .github/workflows/tag-release.yml）
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.0"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.1"
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
 ```
 
@@ -291,6 +330,11 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.7.1** —— 硅基流动双站点：目录 id `siliconflow` 映射国际站
+  （`api.siliconflow.com`，`$`），新增 id `siliconflow-cn` 映射国内站
+  （`api.siliconflow.cn`，`¥`，引用 `SILICONFLOW_CN_API_KEY`）；余额行新增
+  按行 `currency` 覆盖（目录行、`catalog:` 覆盖与显式 `providers:` 条目
+  均可设置）；README 增加双站点 provider id → 端点/币种映射表。
 - **v0.7.0** —— 采纳组织 TypeScript tool-bundle 模板（dsh-plugin-check
   合规、零豁免）：源码迁至 `src/*.ts`，`npm run build` 编译进 `lib/`
   （tsc + vendor 运行时复制），CI 校验已提交产物与构建一致；新增
