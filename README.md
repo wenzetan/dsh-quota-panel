@@ -337,15 +337,37 @@ OpenCode usage (`high = max(rolling, weekly, monthly)`):
 
 ## Install
 
+**Install a released version — not the `main` branch.** `main` receives
+unverified work-in-progress; only tagged releases have passed the CI gates
+(check + boot) and — for stable versions — the human approval gate.
+
+**Recommended — the latest stable release (or the latest pre-release for the
+current iteration cycle):**
+
 ```sh
-# Track main (each install resolves to the latest commit)
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
-# Or pin the auto-tagged release (CI tags after check + boot pass)
+# Pin the latest stable release tag (checked on the Releases page)
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.3"
-# Once the repo secret NPM_TOKEN is configured (see below), by name:
+
+# Or, once the repo secret NPM_TOKEN is configured (see below), by name —
+# npm `latest` always resolves to the last human-approved stable:
 dsh plugin --profile web add dsh-quota-panel
 # Restart `dsh web` (bundle layer and client module graph apply at boot)
 ```
+
+**When you want the latest pre-release** (e.g. testing the current
+`0.8.0-rc.N` iteration):
+
+```sh
+# Pin the pre-release tag
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"
+# Or from npm under the `next` dist-tag:
+dsh plugin --profile web add dsh-quota-panel@next
+```
+
+> **Avoid bare `github:wenzetan/dsh-quota-panel`** (no `#tag`) — it tracks
+> `main` HEAD, which is the testing branch: it may carry unreleased work,
+> fail CI, or break. Only developers iterating on the plugin itself should
+> install from `main`.
 
 Refresh the browser page once after installing. Zero npm dependencies (the
 schema library — schemastery + cosmokit, both MIT — is vendored under

@@ -292,15 +292,34 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 
 ## 安装
 
+**请安装已发布版本，而不是 `main` 分支。** `main` 承载未经人工确认的
+开发中内容；只有打了 tag 的版本才通过了 CI 门禁（check + boot），正式版
+还经过了人工审批门禁。
+
+**推荐——最新正式版（或当前迭代周期的预发布版）：**
+
 ```sh
-# 跟踪 main（每次安装取最新提交）
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
-# 或锁定到自动打出的版本 tag（CI 在 check + boot 通过后打 tag）
+# 锁定最新正式版 tag（以 Releases 页面为准）
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.3"
-# 配置好仓库 secret NPM_TOKEN 后（见下），也可按包名安装：
+
+# 或配置好仓库 secret NPM_TOKEN 后（见下），按包名安装——
+# npm `latest` 始终指向最近一个经人工确认的正式版：
 dsh plugin --profile web add dsh-quota-panel
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
 ```
+
+**需要最新预发布版时**（例如测试当前 `0.8.0-rc.N` 迭代）：
+
+```sh
+# 锁定预发布 tag
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"
+# 或从 npm 的 `next` dist-tag 安装：
+dsh plugin --profile web add dsh-quota-panel@next
+```
+
+> **避免裸 `github:wenzetan/dsh-quota-panel`**（不带 `#tag`）——它跟踪
+> `main` HEAD，即测试分支：可能携带未发布的功能、未过 CI 甚至坏掉的
+> 代码。只有自己迭代该插件的开发者才应该从 `main` 安装。
 
 安装后建议刷新一次浏览器页面。零 npm 依赖（schema 库 schemastery + cosmokit，
 均 MIT，已 vendor 进 `src/vendor/` 并以相对路径导入），无需 `allowBuilds` 构建授权。
