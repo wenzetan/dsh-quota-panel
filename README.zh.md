@@ -335,15 +335,21 @@ dsh plugin --profile web add dsh-quota-panel@next
 
 流程：
 
-1. **迭代** —— bump 到 `0.8.0-rc.1` 推 main。CI 全门禁通过后自动发布
-   预发布版（快速通道，无需审批）。预发布**永远碰不到 `latest`**，
-   `dsh plugin add dsh-quota-panel` 始终解析到上一个已验证的正式版。
-2. **验证** —— 安装 rc 实测（`dsh plugin --profile web add
+1. **迭代（自动）** —— bump 到 `0.8.0-rc.1` 推 main。CI 全门禁通过后
+   **自动打 tag** `v0.8.0-rc.1` 并发布预发布版（快速通道，无需审批）。
+   预发布发布到 npm `next` dist-tag，且**永远不会占有 `latest`**——
+   若 npm 曾把 `latest` 指向预发布，re-claim 步骤会把它重新指回最新
+   正式版——`dsh plugin add dsh-quota-panel` 始终解析到上一个已验证的
+   正式版。
+2. **验证（人工）** —— 安装 rc 实测（`dsh plugin --profile web add
    "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"`，或 npm 的
    `dsh-quota-panel@0.8.0-rc.1`）。
-3. **转正** —— bump 到纯 `0.8.0` 推 main。稳定发布任务重新跑门禁，
-   之后**停在 `production` 环境等待人工审批**——确认后才创建
-   GitHub Release 并发布到 npm `latest`。
+3. **转正（手动，正式版必经）** —— 正式版**永远不会自动打 tag**。
+   在 Actions 页面运行 CI 工作流，把 **`rc_tag`** 输入设为已验证的
+   预发布 tag（如 `v0.8.0-rc.1`）。`promote` 任务会校验该 tag 的 CI 在
+   同一提交上通过，然后在同一提交上创建正式版孪生 tag `v0.8.0` 并
+   派发发布运行。稳定发布任务随后**停在 `production` 环境等待人工
+   审批**——确认后才创建 GitHub Release 并发布到 npm `latest`。
 
 一次性配置：
 

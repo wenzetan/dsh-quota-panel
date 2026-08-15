@@ -385,17 +385,24 @@ Versioning policy — the version string picks the channel:
 
 Workflow:
 
-1. **Iterate** — bump to `0.8.0-rc.1` and push main. CI runs the full gates
-   and publishes the pre-release automatically (fast lane, no approval).
-   A pre-release can never touch `latest`, so `dsh plugin add
-   dsh-quota-panel` keeps resolving to the last verified stable.
-2. **Verify** — install the rc (`dsh plugin --profile web add
+1. **Iterate (automatic)** — bump to `0.8.0-rc.1` and push main. CI runs
+   the full gates, **auto-tags** `v0.8.0-rc.1` and publishes the
+   pre-release (fast lane, no approval). A pre-release is published under
+   the npm `next` dist-tag and can never own `latest` — a reclaim step
+   re-claims `latest` to the newest stable if npm ever pointed it at a
+   prerelease — so `dsh plugin add dsh-quota-panel` keeps resolving to the
+   last verified stable.
+2. **Verify (human)** — install the rc (`dsh plugin --profile web add
    "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"`, or
    `dsh-quota-panel@0.8.0-rc.1` from npm) and test it for real.
-3. **Promote** — bump to plain `0.8.0` and push. The stable release job
-   runs the gates again and then **waits in the `production` environment
-   for a human approval** before creating the GitHub Release and publishing
-   to npm `latest`.
+3. **Promote (manual, required for stable)** — stable versions are NEVER
+   auto-tagged. On the Actions page, run the CI workflow with the
+   **`rc_tag`** input set to the green pre-release tag (e.g.
+   `v0.8.0-rc.1`). The `promote` job verifies that tag's CI run passed on
+   exactly that commit, creates the stable twin `v0.8.0` on the same
+   commit and dispatches the release run. The stable release job then
+   **waits in the `production` environment for a human approval** before
+   creating the GitHub Release and publishing to npm `latest`.
 
 One-time setup:
 

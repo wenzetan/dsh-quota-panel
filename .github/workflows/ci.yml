@@ -24,19 +24,22 @@
 #         from the seeded credential — proving the v0.5+ catalog probe
 #         pipeline works end-to-end in a genuine boot.
 #
-# tag:  only after check+boot pass on main, cut the release tag from
-#         package.json and push it (replaces the old tag-release.yml,
-#         which tagged regardless of CI status).
+# tag:  PRE-RELEASE versions (X.Y.Z-rc.N) are auto-tagged from main after
+#         check+boot pass and dispatched to the release run. STABLE versions
+#         (plain X.Y.Z) are never auto-tagged: a human promotes a green rc
+#         via the workflow_dispatch `rc_tag` input (promote job), which
+#         creates the stable twin tag on the same commit and dispatches the
+#         release run.
 #
-# release: on the v* tag push (from the tag job or by hand) — re-runs
-#         check+boot on the exact tag, then publishes along one of two
-#         channels picked by the version string (see the release jobs
-#         below): -rc.N/-beta.N suffixes go to the pre-release channel
-#         (GitHub prerelease + npm dist-tag `next`, no approval needed);
-#         plain X.Y.Z goes to the stable channel (GitHub `production`
-#         environment with a required reviewer = the human confirmation,
-#         npm dist-tag `latest`). A broken build can therefore never
-#         become what a bare install resolves to.
+# release: on the v* tag (from the tag job / promote job or by hand) —
+#         re-runs check+boot on the exact tag, then publishes along one of
+#         two channels picked by the version string: -rc.N/-beta.N suffixes
+#         go to the pre-release channel (GitHub prerelease + npm dist-tag
+#         `next`, no approval needed; a reclaim step keeps `latest` off
+#         prereleases); plain X.Y.Z goes to the stable channel (GitHub
+#         `production` environment with a required reviewer = the human
+#         confirmation, npm dist-tag `latest`). A broken build can
+#         therefore never become what a bare install resolves to.
 
 name: CI
 
@@ -46,6 +49,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      rc_tag:
+        description: 'Promote a green pre-release tag to its stable twin on the same commit (e.g. v0.9.0-rc.3 -> v0.9.0). Leave empty to only run check + boot.'
+        required: false
+        type: string
 
 jobs:
   check:
@@ -261,8 +269,12 @@ jobs:
           fi
           echo "boot gate passed: web ready, client HTTP $client, specs HTTP $rpc, rows discovered"
 
-  # Auto-tag from main — only when check + boot both passed (replaces
-  # tag-release.yml, which tagged without any validation).
+  # Auto-tag PRE-RELEASES from main — only when check + boot both passed.
+  # A version with a -suffix (0.9.0-rc.1) is auto-tagged and released to
+  # the next channel; a plain stable version (0.9.0) is NEVER auto-tagged:
+  # it waits for a human to promote a green rc via the workflow_dispatch
+  # `rc_tag` input (promote job below). (Replaces tag-release.yml, which
+  # tagged without any validation.)
   tag:
     needs: [check, boot]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -276,9 +288,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Resolve version from package.json
+      - name: Resolve version and channel from package.json
         id: ver
-        run: echo "version=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [[ "$v" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Check whether the tag already exists
         id: check
         run: |
@@ -288,8 +307,8 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Create and push the tag
-        if: steps.check.outputs.exists == 'false'
+      - name: Create and push the pre-release tag
+        if: steps.check.outputs.exists == 'false' && steps.ver.outputs.prerelease == 'true'
         env:
           TAG: ${{ steps.ver.outputs.version }}
         run: |
@@ -301,11 +320,61 @@ jobs:
       # workflow (GitHub's recursion guard), so the release jobs would never
       # run. Dispatch the release run on the new tag explicitly.
       - name: Trigger the release run on the new tag
-        if: steps.check.outputs.exists == 'false'
+        if: steps.check.outputs.exists == 'false' && steps.ver.outputs.prerelease == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.ver.outputs.version }}
         run: gh workflow run ci.yml --ref "$TAG"
+
+  # Manual promotion: the human confirmation step for stable versions.
+  # Dispatch with `rc_tag` set (e.g. v0.9.0-rc.3) — this job verifies that
+  # tag's CI run was green on exactly that commit, then creates the stable
+  # twin v0.9.0 on the same commit and dispatches the release run. If the
+  # `production` environment has a required reviewer, release-stable waits
+  # there for a second, explicit approval.
+  promote:
+    if: github.event_name == 'workflow_dispatch' && inputs.rc_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate the rc tag and create its stable twin
+        id: promote
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RC: ${{ inputs.rc_tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$RC" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.]+$ ]]; then
+            echo "::error::$RC is not a pre-release tag (expected vX.Y.Z-rc.N or similar)"
+            exit 1
+          fi
+          STABLE="v${RC#v}"; STABLE="${STABLE%%-*}"
+          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RC}" --jq '.object.sha')"
+          echo "promoting $RC ($SHA) -> $STABLE"
+          CONCLUSION="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow CI --limit 1 --json conclusion --jq '.[0].conclusion // "none"')"
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::CI for $RC is '$CONCLUSION' (need success) — fix or re-tag before promoting"
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${STABLE}" >/dev/null 2>&1; then
+            echo "::error::$STABLE already exists — bump the version instead"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$STABLE" -m "Release $STABLE" "$SHA"
+          git push origin "$STABLE"
+          echo "stable_tag=$STABLE" >> "$GITHUB_OUTPUT"
+      - name: Trigger the release run on the stable tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STABLE: ${{ steps.promote.outputs.stable_tag }}
+        run: gh workflow run ci.yml --ref "$STABLE"
 
   # ── Release channels ──────────────────────────────────────────────────
   # Both jobs run on the v* tag push (created by the tag job above or by
@@ -361,6 +430,27 @@ jobs:
       - name: Publish to npm under the next dist-tag (only when NPM_TOKEN is configured)
         if: env.NPM_TOKEN != ''
         run: npm publish dsh-quota-panel-*.tgz --access public --tag next
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # npm assigns the `latest` dist-tag to the VERY FIRST version published
+      # even when publishing under --tag next (npm quirk). latest cannot be
+      # deleted (403) — only re-assigned; re-claim it to the newest stable
+      # already on the registry, or warn when none exists yet.
+      - name: Prerelease must not own the latest dist-tag
+        if: env.NPM_TOKEN != ''
+        run: |
+          LATEST="$(npm dist-tag ls dsh-quota-panel | sed -n 's/^latest: //p')"
+          if [ -n "$LATEST" ] && [[ "$LATEST" == *-* ]]; then
+            STABLE="$(npm dist-tag ls dsh-quota-panel | sed -n 's/^[^:]*: //p' | grep -v -- '-' | sort -V | tail -1)"
+            if [ -n "$STABLE" ]; then
+              npm dist-tag add "dsh-quota-panel@$STABLE" latest
+              echo "re-claimed latest: $LATEST -> $STABLE"
+            else
+              echo "::warning::latest=$LATEST is a prerelease and no stable exists yet — the next stable release re-claims latest"
+            fi
+          else
+            echo "latest untouched (${LATEST:-<unset>})"
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
