@@ -295,13 +295,13 @@ OpenCode usage (`high = max(rolling, weekly, monthly)`):
 # Track main (each install resolves to the latest commit)
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
 # Or pin the auto-tagged release (see .github/workflows/tag-release.yml)
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.6.0"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.0"
 # Restart `dsh web` (bundle layer and client module graph apply at boot)
 ```
 
 Refresh the browser page once after installing. Zero npm dependencies (the
 schema library — schemastery + cosmokit, both MIT — is vendored under
-`lib/vendor/` with relative-path imports), no `allowBuilds` authorization
+`src/vendor/` with relative-path imports), no `allowBuilds` authorization
 needed.
 
 The package declares `dsh.bundle.patch` (host half auto-activates as a
@@ -333,10 +333,16 @@ This plugin builds on community work — thanks to:
   Kimi Code usage endpoint.
 - [schemastery](https://github.com/shigma/schemastery) and
   [cosmokit](https://github.com/cosmokit/cosmokit) (both MIT) — the schema
-  library vendored under `lib/vendor/`.
+  library vendored under `src/vendor/`.
 
 ## Changelog
 
+- **v0.7.0** — adopted the org TypeScript tool-bundle template (dsh-plugin-check
+  compliant, zero waivers): sources moved to `src/*.ts` compiled into `lib/`
+  by `npm run build` (tsc + vendored runtime copy), committed artifacts
+  verified current by CI; new `dsh-plugin-check` CI gate (any error or warning
+  fails — currently verdict=pass, 0 error / 0 warning); CI check job now
+  installs dev dependencies and builds before testing.
 - **v0.6.0** — coding-plan support: new catalog rows 智谱 GLM Coding
   (`ZAI_CODING_CN_API_KEY`), Z.AI GLM Coding (`ZAI_API_KEY`), Kimi Coding
   (`KIMI_API_KEY`), MiniMax Coding global/CN (`MINIMAX_API_KEY` /
@@ -390,12 +396,33 @@ This plugin builds on community work — thanks to:
 ## Local development
 
 ```sh
-# Zero dependencies, no npm install needed. To upgrade the vendored schema
-# library, replace the two files under lib/vendor/ and rewrite the cosmokit
-# import on line 1 of schemastery.mjs to "./cosmokit.js".
+# Sources live in src/*.ts (org tool-bundle template): tsc compiles them
+# into lib/ (declarations included) and scripts/build.mjs copies the
+# vendored schema runtime into lib/vendor/. devDependencies are build-only
+# — runtime stays zero-dependency.
+npm install
+npm run build
+
+# After editing src/, rebuild and COMMIT lib/ — github: installs run from
+# the committed artifacts (CI's "Committed artifacts are current" step
+# rejects a stale lib/).
+
 # Dual-face check: host RPC contract + catalog discovery/proxy engine
 # (exercised against real local servers) + client slot/settings surfaces
 node scripts/test-page-script.mjs
+
+# Health check with @deepseek-ai/dsh-plugin-check (same gate as CI; fails
+# on any error or warning). One-off deps dir, then the gate script:
+mkdir -p /tmp/pc-deps && cd /tmp/pc-deps && npm init -y >/dev/null
+npm install --no-audit --no-fund --ignore-scripts \
+  github:omdsh-dev/dsh-plugin-check \
+  @deepseek-ai/dsh-tools @deepseek-ai/dsh-invariants @deepseek-ai/cordis
+cd /path/to/dsh-quota-panel
+PLUGIN_CHECK_DEPS=/tmp/pc-deps node scripts/plugin-check.mjs .
+
+# To upgrade the vendored schema library: replace the two runtime files
+# under src/vendor/ and rewrite the cosmokit import on line 1 of
+# schemastery.mjs to "./cosmokit.js", then rebuild.
 ```
 
 ## License

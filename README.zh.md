@@ -257,12 +257,12 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 # 跟踪 main（每次安装取最新提交）
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
 # 或锁定到自动打出的版本 tag（见 .github/workflows/tag-release.yml）
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.6.0"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.0"
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
 ```
 
 安装后建议刷新一次浏览器页面。零 npm 依赖（schema 库 schemastery + cosmokit，
-均 MIT，已 vendor 进 `lib/vendor/` 并以相对路径导入），无需 `allowBuilds` 构建授权。
+均 MIT，已 vendor 进 `src/vendor/` 并以相对路径导入），无需 `allowBuilds` 构建授权。
 
 包声明了 `dsh.bundle.patch`（宿主侧自动激活为 profile 层）和 `dsh.client`
 manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: true` 随壳预取）。
@@ -287,10 +287,15 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
   —— 记录了 MiniMax `token_plan/remains` 的响应怪癖与 Kimi Code 用量端点。
 - [schemastery](https://github.com/shigma/schemastery) 与
   [cosmokit](https://github.com/cosmokit/cosmokit)（均 MIT）—— vendor 在
-  `lib/vendor/` 下的 schema 库。
+  `src/vendor/` 下的 schema 库。
 
 ## 更新日志
 
+- **v0.7.0** —— 采纳组织 TypeScript tool-bundle 模板（dsh-plugin-check
+  合规、零豁免）：源码迁至 `src/*.ts`，`npm run build` 编译进 `lib/`
+  （tsc + vendor 运行时复制），CI 校验已提交产物与构建一致；新增
+  `dsh-plugin-check` CI 门禁（任何 error 或 warning 都失败——当前
+  verdict=pass，0 error / 0 warning）；CI check 任务先装依赖并构建再测试。
 - **v0.6.0** —— 套餐（Coding Plan）支持：目录新增 智谱 GLM Coding
   （`ZAI_CODING_CN_API_KEY`）、Z.AI GLM Coding（`ZAI_API_KEY`）、Kimi Coding
   （`KIMI_API_KEY`）、MiniMax Coding 国际/国内（`MINIMAX_API_KEY` /
@@ -332,11 +337,30 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 ## 本地开发
 
 ```sh
-# 零依赖，无需 npm install。升级 vendor 时替换 lib/vendor/ 下两个文件并改写
-# schemastery.mjs 第一行的 cosmokit 导入为 "./cosmokit.js" 即可。
+# 源码在 src/*.ts（组织 tool-bundle 模板）：tsc 编译进 lib/（含声明），
+# scripts/build.mjs 再把 vendor 的 schema 运行时复制到 lib/vendor/。
+# devDependencies 仅用于构建——运行时依旧零依赖。
+npm install
+npm run build
+
+# 改 src/ 后重新构建并提交 lib/——github: 安装直接运行已提交的产物
+# （CI 的 "Committed artifacts are current" 步骤会拒绝过期的 lib/）。
+
 # 双面检查：宿主侧 RPC 契约 + 目录发现/代理引擎（对真实本地 server 实测）
 #          + 浏览器侧槽位注册/设置面板表面
 node scripts/test-page-script.mjs
+
+# 用 @deepseek-ai/dsh-plugin-check 做健康检查（与 CI 同一门禁，任何
+# error 或 warning 都失败）。一次性准备依赖目录，再跑门禁脚本：
+mkdir -p /tmp/pc-deps && cd /tmp/pc-deps && npm init -y >/dev/null
+npm install --no-audit --no-fund --ignore-scripts \
+  github:omdsh-dev/dsh-plugin-check \
+  @deepseek-ai/dsh-tools @deepseek-ai/dsh-invariants @deepseek-ai/cordis
+cd /path/to/dsh-quota-panel
+PLUGIN_CHECK_DEPS=/tmp/pc-deps node scripts/plugin-check.mjs .
+
+# 升级 vendor：替换 src/vendor/ 下两个运行时文件并改写 schemastery.mjs
+# 第一行的 cosmokit 导入为 "./cosmokit.js"，然后重新构建。
 ```
 
 ## License

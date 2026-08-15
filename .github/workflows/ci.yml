@@ -1,13 +1,18 @@
 # CI + release gate for dsh-quota-panel.
 #
-# check: the committed dual-face test suite (host RPC half against
-#         mocked upstreams + real local proxy servers, browser half in
-#         a vm sandbox), then npm pack and prove the tarball is complete
-#         and self-contained. This plugin is zero-dependency by design,
-#         so "self-contained" is stricter than dsh-llm-newapi's check:
-#         the host bundle may import NOTHING but node: builtins and
-#         relative paths, and the client bundle nothing but react
-#         (supplied by the host's browser module loader).
+# check: build the TypeScript sources (src/*.ts -> lib/, org tool-bundle
+#         template via scripts/build.mjs: tsc + vendored runtime copy),
+#         prove the committed lib/ matches a fresh build, run the
+#         committed dual-face test suite (host RPC half against mocked
+#         upstreams + real local proxy servers, browser half in a vm
+#         sandbox), the @deepseek-ai/dsh-plugin-check health report
+#         (gated by scripts/plugin-check.mjs, strict: any error or warning
+#         fails), then npm pack and proof the tarball is complete and
+#         self-contained. Runtime stays zero-dependency by design, so
+#         "self-contained" is stricter than dsh-llm-newapi's check: the
+#         host bundle may import NOTHING but node: builtins and relative
+#         paths, and the client bundle nothing but react (supplied by the
+#         host's browser module loader).
 #
 # boot: real-install gate — install the packed tarball through the dsh
 #         CLI into a fresh DSH_HOME, seed one dummy credential, and
@@ -40,8 +45,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+      - name: Install dev dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build (src/*.ts -> lib/ + vendored runtime copy)
+        run: npm run build
+      - name: Committed artifacts are current
+        run: |
+          git diff --exit-code -- lib/ || {
+            echo "::error::lib/ is stale — run 'npm run build' and commit the rebuilt artifacts (github: installs build from the committed lib/)"
+            exit 1
+          }
       - name: Dual-face test suite (host RPC + browser client)
         run: node scripts/test-page-script.mjs
+      # Health check with @deepseek-ai/dsh-plugin-check (omdsh-dev): the
+      # checker's programmatic checkRepo() runs against this checkout and
+      # scripts/plugin-check.mjs fails on ANY error or warning — the repo
+      # follows the org TypeScript tool-bundle template, so nothing is waived.
+      - name: plugin_check (dsh-plugin-check health report)
+        run: |
+          set -euo pipefail
+          ENVDIR="$RUNNER_TEMP/plugin-check-env"
+          mkdir -p "$ENVDIR" && cd "$ENVDIR"
+          npm init -y >/dev/null
+          # --ignore-scripts: the checker's prepack would build TS from its
+          # devDependencies; its lib/ is committed, so the pack installs as is.
+          npm install --no-audit --no-fund --ignore-scripts \
+            github:omdsh-dev/dsh-plugin-check \
+            @deepseek-ai/dsh-tools \
+            @deepseek-ai/dsh-invariants \
+            @deepseek-ai/cordis
+          cd "$GITHUB_WORKSPACE"
+          PLUGIN_CHECK_DEPS="$ENVDIR" node scripts/plugin-check.mjs .
       - name: Pack distribution tarball
         run: npm pack
       - name: Packed tarball is complete and self-contained
