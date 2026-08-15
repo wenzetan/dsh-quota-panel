@@ -346,7 +346,7 @@ current iteration cycle):**
 
 ```sh
 # Pin the latest stable release tag (checked on the Releases page)
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.3"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.8.0"
 
 # Or, once the repo secret NPM_TOKEN is configured (see below), by name —
 # npm `latest` always resolves to the last human-approved stable:
@@ -442,6 +442,9 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.8.0** — first stable release on the dual-channel pipeline: same
+  code as v0.7.3 (which already passed check + boot) plus the install
+  guidance rework (released tags / npm latest + next instead of bare main).
 - **v0.7.3** — no unconfigured provider rows: `cordis.patch.yml` no longer
   ships explicit example rows (deepseek / opencode-go), so the settings
   panel lists exactly the providers whose credential resolves (auto

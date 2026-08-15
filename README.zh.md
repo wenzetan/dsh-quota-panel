@@ -300,7 +300,7 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 
 ```sh
 # 锁定最新正式版 tag（以 Releases 页面为准）
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.3"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.8.0"
 
 # 或配置好仓库 secret NPM_TOKEN 后（见下），按包名安装——
 # npm `latest` 始终指向最近一个经人工确认的正式版：
@@ -383,6 +383,9 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.8.0** —— 双通道发布流水线上的首个正式版：与 v0.7.3 代码相同
+  （已通过 check + boot），另含安装引导改版（锁定已发布 tag / npm
+  latest 与 next，不再推荐裸 main）。
 - **v0.7.3** —— 不再显示未配置的供应商行：`cordis.patch.yml` 移除显式
   示例行（deepseek / opencode-go），设置面板只列出凭据可解析的供应商
   （自动发现）。CI boot 门禁双向断言：种子的 key 上板，未配置的供应商
