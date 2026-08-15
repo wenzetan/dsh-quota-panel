@@ -281,6 +281,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write  # gh workflow run (dispatch the release run on the new tag)
     concurrency:
       group: tag-release-${{ github.ref }}
       cancel-in-progress: false
@@ -336,7 +337,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.rc_tag != ''
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write  # gh run list + gh workflow run (verify CI, dispatch release)
       contents: write
     steps:
       - uses: actions/checkout@v4
