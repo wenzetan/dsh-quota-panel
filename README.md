@@ -340,8 +340,10 @@ OpenCode usage (`high = max(rolling, weekly, monthly)`):
 ```sh
 # Track main (each install resolves to the latest commit)
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
-# Or pin the auto-tagged release (see .github/workflows/tag-release.yml)
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.1"
+# Or pin the auto-tagged release (CI tags after check + boot pass)
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.2"
+# Once the repo secret NPM_TOKEN is configured (see below), by name:
+dsh plugin --profile web add dsh-quota-panel
 # Restart `dsh web` (bundle layer and client module graph apply at boot)
 ```
 
@@ -349,6 +351,41 @@ Refresh the browser page once after installing. Zero npm dependencies (the
 schema library — schemastery + cosmokit, both MIT — is vendored under
 `src/vendor/` with relative-path imports), no `allowBuilds` authorization
 needed.
+
+### Release channels & npm publishing (maintainer)
+
+Versioning policy — the version string picks the channel:
+
+| package.json version | Channel | Gate | GitHub Release | npm dist-tag |
+|---|---|---|---|---|
+| `0.8.0-rc.1` (any `-suffix`) | pre-release | CI only (check + boot) | flagged **pre-release** | `next` |
+| `0.8.0` (plain `X.Y.Z`) | stable | CI **+ human approval** | normal release | `latest` |
+
+Workflow:
+
+1. **Iterate** — bump to `0.8.0-rc.1` and push main. CI runs the full gates
+   and publishes the pre-release automatically (fast lane, no approval).
+   A pre-release can never touch `latest`, so `dsh plugin add
+   dsh-quota-panel` keeps resolving to the last verified stable.
+2. **Verify** — install the rc (`dsh plugin --profile web add
+   "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"`, or
+   `dsh-quota-panel@0.8.0-rc.1` from npm) and test it for real.
+3. **Promote** — bump to plain `0.8.0` and push. The stable release job
+   runs the gates again and then **waits in the `production` environment
+   for a human approval** before creating the GitHub Release and publishing
+   to npm `latest`.
+
+One-time setup:
+
+- **npm token** — create an Automation (or granular) token with publish
+  rights to `dsh-quota-panel` (name free as of this writing) and add it as
+  the repository secret **`NPM_TOKEN`** (Settings → Secrets and variables →
+  Actions). Without it, GitHub Releases still ship; npm steps are skipped.
+- **stable gate** — Settings → Environments → New environment →
+  `production` → Required reviewers → add yourself. This is what makes
+  "no stable release without human confirmation" enforced rather than
+  conventional. (Without the reviewer configured, the stable channel
+  publishes without pausing — same as before.)
 
 The package declares `dsh.bundle.patch` (host half auto-activates as a
 profile layer) and the `dsh.client` manifest (browser half auto-joins the
@@ -383,6 +420,18 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.7.2** — web i18n: the panel follows the shell's language setting
+  (通用设置 → 语言, `locale.preference`; zh / en) through the
+  `ctx.locale` service — all copy (capsule, card, settings panel, errors,
+  aria labels, usage windows) ships as zh/en dictionaries registered under
+  the `quota-panel` namespace; provider labels are proper nouns kept as-is
+  (GLM, MiniMax, Kimi Coding…) with Chinese brand names romanized
+  (智谱 → ZhiPu); host catalog labels normalized accordingly
+  (SiliconFlow CN, MiniMax Coding CN, ZhiPu GLM). Also: usage reset times
+  now show absolute 24h timestamps (下次重置 2026-08-15 14:00, dictionary
+  key `nextReset`); usage rows drop the weekly segment when the plan has no
+  weekly window and render the search/MCP lane as `-%` when it is unknown
+  (no fabricated 0%); the usage caption reads 当前已使用 X%.
 - **v0.7.1** — dual-site SiliconFlow: catalog id `siliconflow` now maps to the
   global site (`api.siliconflow.com`, `$`), new id `siliconflow-cn` maps to
   the China site (`api.siliconflow.cn`, `¥`, ref `SILICONFLOW_CN_API_KEY`);

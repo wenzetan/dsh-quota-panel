@@ -33,13 +33,100 @@
 		var STORAGE_KEY = "dsh-quota-panel:settings";
 
 		var REFRESH_CHOICES = [
-			{ value: "", label: "跟随配置" },
-			{ value: "15000", label: "15 秒" },
-			{ value: "30000", label: "30 秒" },
-			{ value: "60000", label: "1 分钟" },
-			{ value: "120000", label: "2 分钟" },
-			{ value: "300000", label: "5 分钟" }
+			{ value: "" },
+			{ value: "15000" },
+			{ value: "30000" },
+			{ value: "60000" },
+			{ value: "120000" },
+			{ value: "300000" }
 		];
+
+		/** i18n: namespace registered into the shell locale service (apply). */
+		var NS = "quota-panel";
+		var DICT = {
+			zh: {
+				title: "模型额度",
+				expand: "展开模型额度",
+				collapse: "收起模型额度",
+				refresh: "刷新模型额度",
+				openSettings: "打开设置",
+				closeSettings: "关闭设置",
+				allHidden: "已全部隐藏",
+				emptyHint: "所有供应商均已隐藏，可在设置中开启",
+				updatedAt: "更新于 {time}",
+				loadFailed: "无法读取配置",
+				fetchFailed: "查询失败",
+				usageUnavailable: "暂时无法获取用量",
+				quotaUnavailable: "暂时无法获取配额",
+				balanceUnavailable: "暂时无法获取余额",
+				balanceAbnormal: "余额数据异常",
+				winRolling: "滚", winWeekly: "周", winMonthly: "月", winSearch: "搜索",
+				noWinData: "无数据",
+				peakUsage: "当前已使用 {pct}%",
+				nextReset: "下次重置 {time}",
+				balanceCritical: "建议充值",
+				balanceWarn: "余额紧张",
+				balanceOk: "余额正常",
+				balanceRich: "余额充足",
+				settingsProviders: "显示供应商",
+				settingsNoProviders: "（未配置供应商）",
+				settingsInterval: "刷新间隔",
+				settingsAutoRefresh: "自动刷新",
+				followConfig: "跟随配置",
+				secondsSuffix: "{n} 秒",
+				minutesSuffix: "{n} 分钟",
+				settingsProxy: "代理",
+				proxyHint: "填写 http(s) 代理 URL，仅该供应商经此代理查询",
+				proxyConfigured: "已配置代理：{name}（留空沿用）",
+				proxyDirect: "http://127.0.0.1:7890（留空直连）",
+				settingsThresholds: "预警阈值",
+				warnPercentPH: "预警 %（默认 {n}）",
+				warnBalancePH: "预警 {cur}（默认 {n}）",
+				localOnly: "设置仅保存在本浏览器",
+				resetDefaults: "恢复默认"
+			},
+			en: {
+				title: "Model quota",
+				expand: "Expand model quota",
+				collapse: "Collapse model quota",
+				refresh: "Refresh model quota",
+				openSettings: "Open settings",
+				closeSettings: "Close settings",
+				allHidden: "all hidden",
+				emptyHint: "All providers are hidden — re-enable them in settings",
+				updatedAt: "Updated {time}",
+				loadFailed: "Failed to load config",
+				fetchFailed: "Query failed",
+				usageUnavailable: "Usage unavailable",
+				quotaUnavailable: "Quota unavailable",
+				balanceUnavailable: "Balance unavailable",
+				balanceAbnormal: "Malformed balance data",
+				winRolling: "Roll", winWeekly: "Wk", winMonthly: "Mo", winSearch: "Search",
+				noWinData: "no data",
+				peakUsage: "Used {pct}%",
+				nextReset: "Next reset {time}",
+				balanceCritical: "Top-up suggested",
+				balanceWarn: "Running low",
+				balanceOk: "Healthy",
+				balanceRich: "Plenty",
+				settingsProviders: "Providers",
+				settingsNoProviders: "(no providers configured)",
+				settingsInterval: "Refresh interval",
+				settingsAutoRefresh: "Auto refresh",
+				followConfig: "Follow config",
+				secondsSuffix: "{n}s",
+				minutesSuffix: "{n} min",
+				settingsProxy: "Proxy",
+				proxyHint: "http(s) proxy URL — only this provider is queried through it",
+				proxyConfigured: "Configured proxy: {name} (empty keeps it)",
+				proxyDirect: "http://127.0.0.1:7890 (empty = direct)",
+				settingsThresholds: "Warn thresholds",
+				warnPercentPH: "Warn % (default {n})",
+				warnBalancePH: "Warn {cur} (default {n})",
+				localOnly: "Stored in this browser only",
+				resetDefaults: "Reset defaults"
+			}
+		};
 
 		var CSS = [
 			'#dsh-quota-panel{position:fixed;right:18px;bottom:18px;z-index:900;display:flex;flex-direction:column;align-items:flex-end;pointer-events:auto;color:var(--dsw-alias-label-primary,#1b1b1c);font-family:var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif);font-size:13px;line-height:1.45}',
@@ -123,20 +210,12 @@
 			} catch (err) {}
 		}
 
-		function fmtReset(iso) {
-			var ms = new Date(iso).getTime() - Date.now();
-			if (!isFinite(ms) || ms <= 0) return "即将重置";
-			var s = Math.floor(ms / 1000);
-			var d = Math.floor(s / 86400); s -= d * 86400;
-			var h = Math.floor(s / 3600); s -= h * 3600;
-			var m = Math.round(s / 60);
-			if (m === 60) { h += 1; m = 0; }
-			if (h === 24) { d += 1; h = 0; }
-			var parts = [];
-			if (d) parts.push(d + "天");
-			if (h) parts.push(h + "小时");
-			if (m) parts.push(m + "分");
-			return parts.length ? parts.join("") : "即将重置";
+		/** Absolute reset time in 24h local format: 2026-08-15 14:00. */
+		function fmtNextReset(t, iso) {
+			var d = new Date(iso);
+			if (!isFinite(d.getTime())) return "";
+			var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+			return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
 		}
 
 		/** Effective balance tiers with the local warn override applied. */
@@ -161,9 +240,9 @@
 		 * judgement stays client-side so local settings overrides apply
 		 * without a refetch.
 		 */
-		function rowView(spec, entry, warnOverride) {
+		function rowView(t, spec, entry, warnOverride) {
 			var kind = spec.kind || "balance";
-			var unavailable = kind === "usage" ? "暂时无法获取用量" : kind === "info" ? "暂时无法获取配额" : "暂时无法获取余额";
+			var unavailable = kind === "usage" ? t("usageUnavailable") : kind === "info" ? t("quotaUnavailable") : t("balanceUnavailable");
 			if (!entry || entry.error) {
 				return {
 					kind: kind, status: "error", summary: "—", value: "—",
@@ -183,19 +262,35 @@
 				var mp = winPct("monthly");
 				var present = [rp, wp, mp].filter(function (v) { return v !== null; });
 				var high = present.length ? Math.max.apply(null, present) : 0;
-				var labels = spec.windowLabels || { rolling: "滚", weekly: "周", monthly: "月" };
+				var localizeWin = function (label) {
+					return label === "滚" ? t("winRolling") : label === "周" ? t("winWeekly") : label === "月" ? t("winMonthly") : label === "搜索" ? t("winSearch") : label;
+				};
+				var specLabels = spec.windowLabels || {};
+				var labels = {
+					rolling: localizeWin(specLabels.rolling || t("winRolling")),
+					weekly: localizeWin(specLabels.weekly || t("winWeekly")),
+					monthly: localizeWin(specLabels.monthly || t("winMonthly"))
+				};
 				var pcts = effectivePercents(spec, warnOverride);
 				var status = high >= pcts.error ? "error" : high >= pcts.warn ? "warn" : "ok";
+				// Weekly absent -> the segment is dropped entirely; the search/MCP
+				// lane unknown (null) -> "-%" instead of a fabricated 0%.
 				var fmtWin = function (label, v) { return label + " " + (v === null ? "—" : v + "%"); };
 				var titleLine = function (label, v, win) {
-					return label + ": " + (v === null ? "无数据" : v + "%（重置于 " + fmtReset(win && win.resetsAt) + "）");
+					return label + ": " + (v === null ? t("noWinData") : v + "% · " + t("nextReset", { time: fmtNextReset(t, win && win.resetsAt) }));
 				};
+				var textSegs = [fmtWin(labels.rolling, rp)];
+				if (wp !== null) textSegs.push(fmtWin(labels.weekly, wp));
+				textSegs.push(labels.monthly + " " + (mp === null ? "-%" : mp + "%"));
+				var titleLines = [titleLine(labels.rolling, rp, w.rolling)];
+				if (wp !== null) titleLines.push(titleLine(labels.weekly, wp, w.weekly));
+				titleLines.push(titleLine(labels.monthly, mp, w.monthly));
 				return {
 					kind: "usage", status: status, summary: high + "%", value: null,
-					usageText: fmtWin(labels.rolling, rp) + " · " + fmtWin(labels.weekly, wp) + " · " + fmtWin(labels.monthly, mp),
+					usageText: textSegs.join(" · "),
 					barPercent: Math.min(Math.max(high, 0), 100),
-					caption: "当前最高占用 " + high + "%",
-					title: titleLine(labels.rolling, rp, w.rolling) + "\n" + titleLine(labels.weekly, wp, w.weekly) + "\n" + titleLine(labels.monthly, mp, w.monthly)
+					caption: t("peakUsage", { pct: high }),
+					title: titleLines.join("\n")
 				};
 			}
 			if (view.kind === "info") {
@@ -211,16 +306,16 @@
 			if (!Number.isFinite(amount)) {
 				return {
 					kind: "balance", status: "error", summary: "—", value: "—",
-					sub: "余额数据异常", usageText: null, barPercent: 0, caption: "",
+					sub: t("balanceAbnormal"), usageText: null, barPercent: 0, caption: "",
 					title: "non-numeric amount"
 				};
 			}
 			var tiers = effectiveTiers(spec, warnOverride);
 			var status2, sub;
-			if (amount <= tiers.critical) { status2 = "error"; sub = "建议充值"; }
-			else if (amount <= tiers.warn) { status2 = "warn"; sub = "余额紧张"; }
-			else if (amount <= tiers.healthy) { status2 = "ok"; sub = "余额正常"; }
-			else { status2 = "ok"; sub = "余额充足"; }
+			if (amount <= tiers.critical) { status2 = "error"; sub = t("balanceCritical"); }
+			else if (amount <= tiers.warn) { status2 = "warn"; sub = t("balanceWarn"); }
+			else if (amount <= tiers.healthy) { status2 = "ok"; sub = t("balanceOk"); }
+			else { status2 = "ok"; sub = t("balanceRich"); }
 			var shown = (spec.currency || "¥") + amount.toFixed(2);
 			return {
 				kind: "balance", status: status2, summary: shown,
@@ -258,6 +353,7 @@
 			var settings = props.settings;
 			var onChange = props.onChange;
 			var onReset = props.onReset;
+			var t = props.t;
 
 			var toggle = function (id) {
 				var hidden = Object.assign({}, settings.hidden);
@@ -305,8 +401,8 @@
 			var proxyRows = specs.rows.map(function (spec) {
 				var raw = settings.proxy && settings.proxy[spec.id] !== undefined ? String(settings.proxy[spec.id]) : "";
 				var placeholder = spec.proxy
-					? "已配置代理：" + spec.proxy + "（留空沿用）"
-					: "http://127.0.0.1:7890（留空直连）";
+					? t("proxyConfigured", { name: spec.proxy })
+					: t("proxyDirect");
 				return React.createElement("div", { key: spec.id, className: "dsh-setting-row" },
 					React.createElement("span", { className: "dsh-setting-name" }, spec.label),
 					React.createElement("input", {
@@ -322,8 +418,8 @@
 				if (spec.kind === "info") return null;
 				var isUsage = spec.kind === "usage";
 				var placeholder = isUsage
-					? "预警 %（默认 " + (spec.warnPercent || 70) + "）"
-					: "预警 " + (spec.currency || "¥") + "（默认 " + ((spec.balanceTiers && spec.balanceTiers.warn) || 20) + "）";
+					? t("warnPercentPH", { n: (spec.warnPercent || 70) })
+					: t("warnBalancePH", { cur: (spec.currency || "¥"), n: ((spec.balanceTiers && spec.balanceTiers.warn) || 20) });
 				var raw = settings.warn[spec.id];
 				return React.createElement("div", { key: spec.id, className: "dsh-setting-row" },
 					React.createElement("span", { className: "dsh-setting-name" }, spec.label + (isUsage ? "（%）" : "（" + (spec.currency || "¥") + "）")),
@@ -339,33 +435,36 @@
 
 			return React.createElement("div", { className: "dsh-quota-settings" },
 				React.createElement("div", { className: "dsh-setting-section" },
-					React.createElement("div", { className: "dsh-setting-title" }, "显示供应商"),
-					visibilityRows.length ? visibilityRows : React.createElement("div", { className: "dsh-setting-hint" }, "（未配置供应商）")),
+					React.createElement("div", { className: "dsh-setting-title" }, t("settingsProviders")),
+					visibilityRows.length ? visibilityRows : React.createElement("div", { className: "dsh-setting-hint" }, t("settingsNoProviders"))),
 				React.createElement("div", { className: "dsh-setting-section" },
-					React.createElement("div", { className: "dsh-setting-title" }, "刷新间隔"),
+					React.createElement("div", { className: "dsh-setting-title" }, t("settingsInterval")),
 					React.createElement("div", { className: "dsh-setting-row" },
-						React.createElement("span", { className: "dsh-setting-name" }, "自动刷新"),
+						React.createElement("span", { className: "dsh-setting-name" }, t("settingsAutoRefresh")),
 						React.createElement("select", {
 							className: "dsh-setting-select",
 							value: refreshValue,
 							onChange: function (event) { setRefresh(event.target.value); }
 						}, REFRESH_CHOICES.map(function (choice) {
-							return React.createElement("option", { key: choice.value || "follow", value: choice.value },
-								choice.value === "" ? choice.label + "（" + Math.round(specs.refreshMs / 1000) + " 秒）" : choice.label);
+							var label = choice.value === "" ? t("followConfig") + " (" + Math.round(specs.refreshMs / 1000) + "s)" : t("secondsSuffix", { n: Number(choice.value) / 1000 });
+							if (choice.value === "60000") label = t("minutesSuffix", { n: 1 });
+							if (choice.value === "120000") label = t("minutesSuffix", { n: 2 });
+							if (choice.value === "300000") label = t("minutesSuffix", { n: 5 });
+							return React.createElement("option", { key: choice.value || "follow", value: choice.value }, label);
 						})))),
 				React.createElement("div", { className: "dsh-setting-section" },
-					React.createElement("div", { className: "dsh-setting-title" }, "代理"),
-					React.createElement("div", { className: "dsh-setting-hint", style: { marginBottom: "4px" } }, "填写 http(s) 代理 URL，仅该供应商经此代理查询"),
+					React.createElement("div", { className: "dsh-setting-title" }, t("settingsProxy")),
+					React.createElement("div", { className: "dsh-setting-hint", style: { marginBottom: "4px" } }, t("proxyHint")),
 					proxyRows.length ? proxyRows : null),
 				React.createElement("div", { className: "dsh-setting-section" },
-					React.createElement("div", { className: "dsh-setting-title" }, "预警阈值"),
+					React.createElement("div", { className: "dsh-setting-title" }, t("settingsThresholds")),
 					thresholdRows.filter(Boolean).length ? thresholdRows : null),
 				React.createElement("div", { className: "dsh-setting-actions" },
-					React.createElement("span", { className: "dsh-setting-hint" }, "设置仅保存在本浏览器"),
-					React.createElement("button", { className: "dsh-setting-reset", type: "button", onClick: onReset }, "恢复默认")));
+					React.createElement("span", { className: "dsh-setting-hint" }, t("localOnly")),
+					React.createElement("button", { className: "dsh-setting-reset", type: "button", onClick: onReset }, t("resetDefaults"))));
 		}
 
-		const inject = ["slots", "timer", "connection"];
+		const inject = ["slots", "timer", "connection", "locale"];
 
 		function apply(ctx) {
 			// Standard cordis effect: setup runs now, the RETURNED function is the
@@ -380,7 +479,8 @@
 				return function () { tag.remove(); };
 			});
 
-			function QuotaPanel() {
+			function QuotaPanel(props) {
+				var t = props.t;
 				var specsState = React.useState(null);
 				var specs = specsState[0], setSpecs = specsState[1];
 				var dataState = React.useState({});
@@ -407,7 +507,7 @@
 						if (result && result.ok === true && result.value && Array.isArray(result.value.rows)) {
 							setSpecs(result.value);
 						} else {
-							setLoadError(result && result.error ? result.error.message : "无法读取配置");
+							setLoadError(result && result.error ? result.error.message : t("loadFailed"));
 						}
 					}).catch(function (error) {
 						setLoadError(String((error && error.message) || error));
@@ -433,7 +533,7 @@
 							setFetchedAt(result.value.fetchedAt || Date.now());
 							setLoadError(null);
 						} else {
-							setLoadError(result && result.error ? result.error.message : "查询失败");
+							setLoadError(result && result.error ? result.error.message : t("fetchFailed"));
 						}
 					}).catch(function (error) {
 						setLoadError(String((error && error.message) || error));
@@ -477,7 +577,7 @@
 					rows = specs.rows.filter(function (spec) { return !settings.hidden[spec.id]; });
 					for (var i = 0; i < specs.rows.length; i++) {
 						var spec = specs.rows[i];
-						views[spec.id] = rowView(spec, dataById[spec.id], settings.warn[spec.id]);
+						views[spec.id] = rowView(t, spec, dataById[spec.id], settings.warn[spec.id]);
 					}
 				}
 
@@ -486,7 +586,7 @@
 					if (specs === null && loadError !== null) {
 						pairs.push(React.createElement("span", { key: "err", className: "dsh-capsule-item state-error" }, "—"));
 					} else if (rows.length === 0) {
-						pairs.push(React.createElement("span", { key: "none", className: "dsh-capsule-item state-loading" }, "已全部隐藏"));
+						pairs.push(React.createElement("span", { key: "none", className: "dsh-capsule-item state-loading" }, t("allHidden")));
 					} else {
 						for (var j = 0; j < rows.length; j++) {
 							var rspec = rows[j];
@@ -503,7 +603,7 @@
 						React.createElement("button", {
 							id: "dsh-quota-capsule",
 							type: "button",
-							"aria-label": "展开模型额度",
+							"aria-label": t("expand"),
 							"aria-expanded": "false",
 							onClick: function () { setExpanded(true); }
 						}, pairs));
@@ -513,6 +613,7 @@
 				if (settingsOpen) {
 					bodyChildren.push(React.createElement(SettingsPanel, {
 						key: "settings",
+						t: t,
 						specs: specs,
 						settings: settings,
 						onChange: updateSettings,
@@ -521,7 +622,7 @@
 				} else if (loadError !== null) {
 					bodyChildren.push(React.createElement("div", { key: "err", className: "dsh-quota-error" }, String(loadError)));
 				} else if (rows.length === 0) {
-					bodyChildren.push(React.createElement("div", { key: "empty", className: "dsh-provider-sub" }, "所有供应商均已隐藏，可在设置中开启"));
+					bodyChildren.push(React.createElement("div", { key: "empty", className: "dsh-provider-sub" }, t("emptyHint")));
 				} else {
 					for (var k = 0; k < rows.length; k++) {
 						if (k > 0) bodyChildren.push(React.createElement("div", { key: rows[k].id + "-div", className: "dsh-quota-divider" }));
@@ -530,41 +631,45 @@
 					if (fetchedAt !== null) {
 						bodyChildren.push(React.createElement("div", { key: "at", className: "dsh-quota-divider" }));
 						bodyChildren.push(React.createElement("div", { key: "at-text", className: "dsh-usage-caption" },
-							"更新于 " + new Date(fetchedAt).toLocaleTimeString()));
+							t("updatedAt", { time: new Date(fetchedAt).toLocaleTimeString() })));
 					}
 				}
 
 				return React.createElement("div", { id: "dsh-quota-panel" },
 					React.createElement("div", { id: "dsh-quota-card" },
 						React.createElement("div", { className: "dsh-quota-header" },
-							React.createElement("div", { className: "dsh-quota-title" }, "模型额度"),
+							React.createElement("div", { className: "dsh-quota-title" }, t("title")),
 							React.createElement("div", { className: "dsh-quota-actions" },
 								React.createElement("button", {
 									className: "dsh-quota-icon" + (refreshing ? " is-loading" : ""),
 									type: "button",
-									"aria-label": "刷新模型额度",
+									"aria-label": t("refresh"),
 									disabled: refreshing,
 									onClick: function () { refreshAll(); }
 								}, "↻"),
 								React.createElement("button", {
 									className: "dsh-quota-icon" + (settingsOpen ? " is-active" : ""),
 									type: "button",
-									"aria-label": settingsOpen ? "关闭设置" : "打开设置",
+									"aria-label": settingsOpen ? t("closeSettings") : t("openSettings"),
 									"aria-expanded": settingsOpen ? "true" : "false",
 									onClick: function () { setSettingsOpen(!settingsOpen); }
 								}, "⚙"),
 								React.createElement("button", {
 									className: "dsh-quota-icon",
 									type: "button",
-									"aria-label": "收起模型额度",
+									"aria-label": t("collapse"),
 									onClick: function () { setExpanded(false); }
 								}, "▴"))),
 						bodyChildren));
 			}
 
+			ctx.effect(function () {
+				return ctx.locale.register(NS, DICT);
+			}, "dsh-quota-panel: copy dictionaries");
+			const t = ctx.locale.bind(NS);
 			ctx.slots.inject("shell.overlay", () => ctx.slots.register(
-				{ name: "shell.overlay", id: "dsh-quota-panel", order: 100, label: "模型额度" },
-				() => React.createElement(QuotaPanel, null)
+				{ name: "shell.overlay", id: "dsh-quota-panel", order: 100, label: () => t("title"), locale: NS },
+				(props: any) => React.createElement(QuotaPanel, { t: props.t })
 			));
 		}
 

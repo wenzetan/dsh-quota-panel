@@ -243,6 +243,55 @@ check('A: zhipu quota percentage fallback', (() => {
 	return row && row.view?.kind === 'info' && row.view.text === '969/1 · 64%';
 })());
 
+// ---------- A2d: search lane unknown / absent weekly (no fabricated 0%) ----------
+let t1, t2;
+globalThis.fetch = async (url) => {
+	if (String(url).includes('bigmodel') || String(url).includes('api.z.ai')) {
+		// TIME_LIMIT present but no parseable count/percent -> null
+		return { ok: true, status: 200, json: async () => ({ code: 200, data: { limits: [
+			{ type: 'TIME_LIMIT', unit: 5, number: 1, nextResetTime: 1893456000000 },
+			{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 96, nextResetTime: 1893456000000 }
+		] } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { t1 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: search lane unknown -> monthly.percent null', (() => {
+	const row = t1.value.rows.find((r) => r.id === 'zai-coding-cn');
+	return row.view?.kind === 'usage' && row.view.windows?.monthly?.percent === null;
+})());
+globalThis.fetch = async (url) => {
+	if (String(url).includes('bigmodel') || String(url).includes('api.z.ai')) {
+		// no TIME_LIMIT at all -> no monthly window; only 5h tokens
+		return { ok: true, status: 200, json: async () => ({ code: 200, data: { limits: [
+			{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 96, nextResetTime: 1893456000000 }
+		] } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { t2 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: no TIME_LIMIT -> no monthly window (client drops/renders -%)', (() => {
+	const row = t2.value.rows.find((r) => r.id === 'zai-coding-cn');
+	const w = row.view?.windows;
+	return w?.rolling?.percent === 96 && w?.weekly === undefined && w?.monthly === undefined;
+})());
+let t3;
+globalThis.fetch = async (url) => {
+	if (String(url).includes('bigmodel') || String(url).includes('api.z.ai')) {
+		// currentValue 0 / usage 100 -> 0% is a REAL value, not unknown
+		return { ok: true, status: 200, json: async () => ({ code: 200, data: { limits: [
+			{ type: 'TIME_LIMIT', unit: 5, number: 1, usage: 100, currentValue: 0, percentage: 0, nextResetTime: 1893456000000 },
+			{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 96, nextResetTime: 1893456000000 }
+		] } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { t3 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: search lane 0% is kept as a real value', (() => {
+	const row = t3.value.rows.find((r) => r.id === 'zai-coding-cn');
+	return row.view?.windows?.monthly?.percent === 0;
+})());
+
 // hide drops catalog rows
 handler = mount({ hide: ['zhipu'] });
 specs = await handler('specs', null, undefined);
@@ -427,10 +476,11 @@ const clientExports = handoffs[0].factory((spec) => {
 	throw new Error(`unexpected require: ${spec}`);
 });
 check('B: exports apply + inject', typeof clientExports.apply === 'function' && Array.isArray(clientExports.inject));
-check('B: inject services', JSON.stringify(clientExports.inject) === JSON.stringify(['slots', 'timer', 'connection']));
+check('B: inject services', JSON.stringify(clientExports.inject) === JSON.stringify(['slots', 'timer', 'connection', 'locale']));
 
 let injectedSlot = null;
 let registered = null;
+let localeDicts = null;
 const clientCtx = {
 	effect: (fn) => { fn(); return () => {}; },
 	interval: () => () => {},
@@ -439,36 +489,41 @@ const clientCtx = {
 		inject: (name, fn) => { injectedSlot = name; fn(); },
 		register: (spec, renderer) => { registered = { spec, renderer }; }
 	},
+	locale: {
+		register: (ns, dicts) => { localeDicts = { ns, dicts }; return () => {}; },
+		bind: () => (key, params) => key
+	},
 	connection: { rpc: { call: async () => ({ ok: false, error: { code: 'internal', message: 'stub' } }) } }
 };
 clientExports.apply(clientCtx);
 check('B: injects into shell.overlay', injectedSlot === 'shell.overlay');
-check('B: registers entry id dsh-quota-panel', registered?.spec?.id === 'dsh-quota-panel' && registered?.spec?.name === 'shell.overlay');
-const element = registered.renderer();
+check('B: registers entry id dsh-quota-panel', registered?.spec?.id === 'dsh-quota-panel' && registered?.spec?.name === 'shell.overlay' && registered?.spec?.locale === 'quota-panel');
+check('B: locale dictionaries registered (zh + en)', !!localeDicts && localeDicts.ns === 'quota-panel' && !!localeDicts.dicts.zh && !!localeDicts.dicts.en && localeDicts.dicts.zh.title === '模型额度' && localeDicts.dicts.en.title === 'Model quota');
+const element = registered.renderer({ t: (key) => key });
 check('B: renderer returns element', element && typeof element.type === 'function');
 
 // Surface checks on the bundle source (gear entry, aria, persistence, overlay opt-in).
 const surface = {
 	'gear button ⚙': clientSource.includes('"⚙"'),
-	'gear aria 打开设置/关闭设置': clientSource.includes('打开设置') && clientSource.includes('关闭设置'),
+	'gear aria keys': clientSource.includes('openSettings') && clientSource.includes('closeSettings'),
 	'gear active class': clientSource.includes('is-active'),
-	'refresh button + aria': clientSource.includes('刷新模型额度'),
-	'collapse aria': clientSource.includes('收起模型额度'),
-	'capsule expand aria': clientSource.includes('展开模型额度'),
-	'settings: provider visibility': clientSource.includes('显示供应商'),
-	'settings: refresh interval': clientSource.includes('刷新间隔') && clientSource.includes('跟随配置'),
-	'settings: warn thresholds': clientSource.includes('预警阈值'),
-	'settings: proxy section': clientSource.includes('"代理"') && clientSource.includes('setProxy'),
+	'aria keys present': clientSource.includes('t("expand")') && clientSource.includes('t("collapse")') && clientSource.includes('t("refresh")'),
+
+	'settings: provider visibility key': clientSource.includes('settingsProviders'),
+	'settings: refresh interval key': clientSource.includes('settingsInterval') && clientSource.includes('followConfig'),
+	'settings: warn thresholds key': clientSource.includes('settingsThresholds'),
+	'settings: proxy section key': clientSource.includes('settingsProxy') && clientSource.includes('setProxy'),
 	'fetch-all payload carries proxy': clientSource.includes('"fetch-all", { proxy: proxyPayload }'),
 	'reset clears proxy': clientSource.includes('proxy: {}'),
-	'settings: reset button': clientSource.includes('恢复默认'),
+	'settings: reset button key': clientSource.includes('resetDefaults'),
 	'settings persist localStorage': clientSource.includes('localStorage') && clientSource.includes('dsh-quota-panel:settings'),
 	'pointer-events opt-in (overlay)': clientSource.includes('pointer-events:auto'),
 	'rpc channel matches host': clientSource.includes('"/dsh-quota-panel"') && clientSource.includes('"specs"') && clientSource.includes('"fetch-all"'),
-	'rpc error surfaced': clientSource.includes('查询失败') && clientSource.includes('无法读取配置'),
+	'rpc error keys': clientSource.includes('loadFailed') && clientSource.includes('fetchFailed'),
 	'hidden-page skip': clientSource.includes('document.hidden'),
 	'visibilitychange': clientSource.includes('visibilitychange'),
-	'hidden-all fallback text': clientSource.includes('已全部隐藏'),
+	'hidden-all fallback key': clientSource.includes('allHidden'),
+	'zh and en dictionaries shipped': clientSource.includes('title: "模型额度"') && clientSource.includes('title: "Model quota"') && clientSource.includes('zh: {') && clientSource.includes('en: {'),
 	'view kinds rendered': clientSource.includes('view.kind === "usage"') && clientSource.includes('view.kind === "info"') && clientSource.includes('"balance"'),
 	'info status styled': clientSource.includes('state-info'),
 	'settings thresholds follow spec.kind': clientSource.includes('spec.kind === "info"'),

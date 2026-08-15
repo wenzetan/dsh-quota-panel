@@ -349,9 +349,13 @@ window.fetch = function (url) {
     var labels = spec.windowLabels || { rolling: '滚', weekly: '周', monthly: '月' };
     var fmtWin = function (label, v) { return label + ' ' + (v === null ? '—' : v + '%'); };
 
-    view.usage.textContent = fmtWin(labels.rolling, rp) + ' · ' + fmtWin(labels.weekly, wp) + ' · ' + fmtWin(labels.monthly, mp);
+    // weekly absent -> dropped; search lane unknown -> -%
+    var textSegs = [fmtWin(labels.rolling, rp)];
+    if (wp !== null) textSegs.push(fmtWin(labels.weekly, wp));
+    textSegs.push(labels.monthly + ' ' + (mp === null ? '-%' : mp + '%'));
+    view.usage.textContent = textSegs.join(' · ');
     view.progress.style.width = Math.min(Math.max(high, 0), 100) + '%';
-    view.caption.textContent = '当前最高占用 ' + high + '%';
+    view.caption.textContent = '当前已使用 ' + high + '%';
 
     var status;
     if (high >= spec.errorPercent) status = 'error';
@@ -362,7 +366,10 @@ window.fetch = function (url) {
     var titleLine = function (label, v, win) {
       return label + ': ' + (v === null ? '无数据' : v + '%（重置于 ' + fmtReset(win && win.resetsAt) + '）');
     };
-    view.root.title = titleLine(labels.rolling, rp, u.rolling) + '\n' + titleLine(labels.weekly, wp, u.weekly) + '\n' + titleLine(labels.monthly, mp, u.monthly);
+    var titleLines = [titleLine(labels.rolling, rp, u.rolling)];
+    if (wp !== null) titleLines.push(titleLine(labels.weekly, wp, u.weekly));
+    titleLines.push(titleLine(labels.monthly, mp, u.monthly));
+    view.root.title = titleLines.join('\n');
     STATE[spec.id] = { status: status, summary: high + '%' };
     renderCapsule();
   }

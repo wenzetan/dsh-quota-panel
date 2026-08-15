@@ -133,14 +133,14 @@ const CATALOG = [
 	{ id: 'deepseek', label: 'DeepSeek', refs: ['DEEPSEEK_API_KEY'], endpoint: 'https://api.deepseek.com/user/balance', format: 'deepseek-balance' },
 	{ id: 'openrouter', label: 'OpenRouter', refs: ['OPENROUTER_API_KEY'], endpoint: 'https://openrouter.ai/api/v1/credits', format: 'openrouter-credits' },
 	{ id: 'siliconflow', label: 'SiliconFlow', refs: ['SILICONFLOW_API_KEY'], endpoint: 'https://api.siliconflow.com/v1/user/info', format: 'siliconflow-balance', currency: '$' },
-	{ id: 'siliconflow-cn', label: 'SiliconFlow 国内', refs: ['SILICONFLOW_CN_API_KEY'], endpoint: 'https://api.siliconflow.cn/v1/user/info', format: 'siliconflow-balance' },
+	{ id: 'siliconflow-cn', label: 'SiliconFlow CN', refs: ['SILICONFLOW_CN_API_KEY'], endpoint: 'https://api.siliconflow.cn/v1/user/info', format: 'siliconflow-balance' },
 	{ id: 'moonshot', label: 'Moonshot', refs: ['MOONSHOT_API_KEY'], endpoint: 'https://api.moonshot.cn/v1/users/me/balance', format: 'moonshot-balance' },
 	{ id: 'minimax', label: 'MiniMax Coding', refs: ['MINIMAX_API_KEY'], endpoint: 'https://www.minimax.io/v1/token_plan/remains', format: 'minimax-remains', windowLabels: { rolling: '5h' } },
-	{ id: 'minimax-cn', label: 'MiniMax Coding 国内', refs: ['MINIMAX_CN_API_KEY'], endpoint: 'https://api.minimaxi.com/v1/token_plan/remains', format: 'minimax-remains', windowLabels: { rolling: '5h' } },
+	{ id: 'minimax-cn', label: 'MiniMax Coding CN', refs: ['MINIMAX_CN_API_KEY'], endpoint: 'https://api.minimaxi.com/v1/token_plan/remains', format: 'minimax-remains', windowLabels: { rolling: '5h' } },
 	{ id: 'stepfun', label: 'StepFun', refs: ['STEP_API_KEY', 'STEPFUN_API_KEY'], endpoint: 'https://api.stepfun.com/v1/accounts', format: 'stepfun-accounts' },
 	{ id: 'xai', label: 'xAI', refs: ['XAI_API_KEY'], endpoint: 'https://api.x.ai/v1/billing/credits', format: 'xai-credits' },
-	{ id: 'zhipu', label: '智谱 GLM', refs: ['ZHIPU_API_KEY', 'GLM_API_KEY'], endpoint: 'https://open.bigmodel.cn/api/monitor/usage/quota/limit', format: 'zhipu-quota' },
-	{ id: 'zai-coding-cn', label: '智谱 GLM Coding', refs: ['ZAI_CODING_CN_API_KEY'], endpoint: 'https://open.bigmodel.cn/api/monitor/usage/quota/limit', format: 'zai-coding-quota', windowLabels: { rolling: '5h', weekly: '周', monthly: '搜索' } },
+	{ id: 'zhipu', label: 'ZhiPu GLM', refs: ['ZHIPU_API_KEY', 'GLM_API_KEY'], endpoint: 'https://open.bigmodel.cn/api/monitor/usage/quota/limit', format: 'zhipu-quota' },
+	{ id: 'zai-coding-cn', label: 'ZhiPu GLM Coding', refs: ['ZAI_CODING_CN_API_KEY'], endpoint: 'https://open.bigmodel.cn/api/monitor/usage/quota/limit', format: 'zai-coding-quota', windowLabels: { rolling: '5h', weekly: '周', monthly: '搜索' } },
 	{ id: 'zai', label: 'Z.AI GLM Coding', refs: ['ZAI_API_KEY'], endpoint: 'https://api.z.ai/api/monitor/usage/quota/limit', format: 'zai-coding-quota', windowLabels: { rolling: '5h', weekly: '周', monthly: '搜索' } },
 	{ id: 'kimi-coding', label: 'Kimi Coding', refs: ['KIMI_API_KEY'], endpoint: 'https://api.kimi.com/coding/v1/usages', format: 'kimi-coding-usage', windowLabels: { rolling: '5h', weekly: '周' } },
 	{ id: 'opencode-go', label: 'OpenCode Go', refs: ['OPENCODE_GO_API_KEY'], endpoint: 'https://opencode.ai/zen/go/v1/usage', format: 'opencode-usage' }
@@ -251,11 +251,14 @@ const FORMATS = {
 			const n = Number(l?.percentage);
 			return Number.isFinite(n) ? Math.round(n) : 0;
 		};
+		// Search/MCP lane: only a parseable value counts; unknown renders as
+		// null so the client shows "-%" instead of a fabricated 0%.
 		const countPct = (l) => {
 			const used = Number(l?.currentValue);
 			const total = Number(l?.usage);
 			if (Number.isFinite(used) && Number.isFinite(total) && total > 0) return Math.round((used / total) * 100);
-			return pct(l);
+			const p = Number(l?.percentage);
+			return Number.isFinite(p) ? Math.round(p) : null;
 		};
 		const resets = (l) => (Number.isFinite(Number(l?.nextResetTime)) ? new Date(Number(l.nextResetTime)).toISOString() : undefined);
 		const windows: Record<string, any> = {};
@@ -268,7 +271,7 @@ const FORMATS = {
 			plan ? `plan: ${plan}` : null,
 			tokens.length > 0 ? `5h tokens: ${pct(tokens[0])}%` : null,
 			tokens.length > 1 ? `weekly tokens: ${pct(tokens[tokens.length - 1])}%` : null,
-			time ? `searches: ${Number(time.currentValue)}/${Number(time.usage)}` : null
+			time && time.currentValue != null && time.usage != null ? `searches: ${time.currentValue}/${time.usage}` : (time ? 'searches: -' : null)
 		].filter(Boolean).join('\n');
 		return { kind: 'usage', windows, title };
 	},

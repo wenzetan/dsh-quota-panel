@@ -295,13 +295,47 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 ```sh
 # 跟踪 main（每次安装取最新提交）
 dsh plugin --profile web add "github:wenzetan/dsh-quota-panel"
-# 或锁定到自动打出的版本 tag（见 .github/workflows/tag-release.yml）
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.1"
+# 或锁定到自动打出的版本 tag（CI 在 check + boot 通过后打 tag）
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.7.2"
+# 配置好仓库 secret NPM_TOKEN 后（见下），也可按包名安装：
+dsh plugin --profile web add dsh-quota-panel
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
 ```
 
 安装后建议刷新一次浏览器页面。零 npm 依赖（schema 库 schemastery + cosmokit，
 均 MIT，已 vendor 进 `src/vendor/` 并以相对路径导入），无需 `allowBuilds` 构建授权。
+
+### 发布通道与 npm 发布（维护者）
+
+版本即通道——package.json 里的版本字符串决定发布行为：
+
+| package.json 版本 | 通道 | 门禁 | GitHub Release | npm dist-tag |
+|---|---|---|---|---|
+| `0.8.0-rc.1`（任何 `-` 后缀） | 预发布 | 仅 CI（check + boot） | 标记 **pre-release** | `next` |
+| `0.8.0`（纯 `X.Y.Z`） | 正式 | CI **+ 人工审批** | 正式 release | `latest` |
+
+流程：
+
+1. **迭代** —— bump 到 `0.8.0-rc.1` 推 main。CI 全门禁通过后自动发布
+   预发布版（快速通道，无需审批）。预发布**永远碰不到 `latest`**，
+   `dsh plugin add dsh-quota-panel` 始终解析到上一个已验证的正式版。
+2. **验证** —— 安装 rc 实测（`dsh plugin --profile web add
+   "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"`，或 npm 的
+   `dsh-quota-panel@0.8.0-rc.1`）。
+3. **转正** —— bump 到纯 `0.8.0` 推 main。稳定发布任务重新跑门禁，
+   之后**停在 `production` 环境等待人工审批**——确认后才创建
+   GitHub Release 并发布到 npm `latest`。
+
+一次性配置：
+
+- **npm 令牌** —— 创建 Automation（或细粒度）令牌，对 `dsh-quota-panel`
+  有发布权限（该包名目前未被占用），添加为仓库 secret
+  **`NPM_TOKEN`**（Settings → Secrets and variables → Actions）。
+  未配置时 GitHub Release 照常发布，仅跳过 npm 步骤。
+- **正式版门禁** —— Settings → Environments → New environment →
+  `production` → Required reviewers → 加上你自己。这是把
+  「未经人工确认不发正式版」从约定变成**强制**的关键。
+  （不配置审批人时，稳定通道会直接发布不暂停——与之前行为一致。）
 
 包声明了 `dsh.bundle.patch`（宿主侧自动激活为 profile 层）和 `dsh.client`
 manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: true` 随壳预取）。
@@ -330,6 +364,16 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.7.2** —— web 端 i18n：面板跟随壳的语言设置（通用设置 → 语言，
+  `locale.preference`；中/英）——胶囊、卡片、设置面板、错误文案、
+  aria 标签、用量窗口等全部文案以 zh/en 词典形式注册到 `quota-panel`
+  命名空间（经 `ctx.locale` 服务）；供应商标签为专有名词保留原样
+  （GLM、MiniMax、Kimi Coding 等），中文品牌名统一拼音
+  （智谱 → ZhiPu）；宿主目录标签同步规范化（SiliconFlow CN、
+  MiniMax Coding CN、ZhiPu GLM）。另：用量重置时间改为 24 小时制绝对时间
+  （下次重置 2026-08-15 14:00，词典键 `nextReset`）；套餐无周限额时
+  用量行整体省略周段，搜索/MCP 额度查询不到时显示 `-%`（不再伪造 0%）；
+  用量摘要文案改为「当前已使用 X%」。
 - **v0.7.1** —— 硅基流动双站点：目录 id `siliconflow` 映射国际站
   （`api.siliconflow.com`，`$`），新增 id `siliconflow-cn` 映射国内站
   （`api.siliconflow.cn`，`¥`，引用 `SILICONFLOW_CN_API_KEY`）；余额行新增
