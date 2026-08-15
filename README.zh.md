@@ -389,6 +389,10 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.8.1-rc.1** —— 自动 rc 管线上的首个预发布：用量达到 100% 时摘要
+  追加重置时间（当前已使用 100% 等待重置 …）；CI 重构（参考
+  dsh-llm-newapi）：预发布自动打 tag 并发布到 npm `next`（含 `latest`
+  回收守卫）；正式版需手动 `rc_tag` 转正。
 - **v0.8.0** —— 双通道发布流水线上的首个正式版：与 v0.7.3 代码相同
   （已通过 check + boot），另含安装引导改版（锁定已发布 tag / npm
   latest 与 next，不再推荐裸 main）。

@@ -449,6 +449,11 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.8.1-rc.1** — first pre-release on the automatic rc pipeline: 100% usage
+  caption appends the reset time (当前已使用 100% 等待重置 …); CI reworked
+  (reference dsh-llm-newapi): pre-releases auto-tag + publish to npm `next`
+  with a `latest` reclaim guard; stable versions require the manual
+  `rc_tag` promote workflow.
 - **v0.8.0** — first stable release on the dual-channel pipeline: same
   code as v0.7.3 (which already passed check + boot) plus the install
   guidance rework (released tags / npm latest + next instead of bare main).
