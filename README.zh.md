@@ -219,7 +219,7 @@ credential 引用名，UPPER_SNAKE）/ `secretRefs`（第二凭据引用，火�
 
 - 进入 [访问控制 → 用户](https://console.volcengine.com/iam/user/list)，找到该子用户，点「权限」→「添加权限」；
 - 在「搜索策略名和备注」输入框里输入 `ArkReadOnlyAccess`；
-- 在结果里选**服务来源为「火山方舟」**的那一条（不是全局只读），点确定。
+- 结果里服务来源为「火山方舟」的那一条就是所需策略，勾上它即可（搜索结果中同名策略只有两条，都勾上也不会有副作用）。
 
 只挂 `ArkReadOnlyAccess` 即可——`GetAFPUsage` / `GetCodingPlanUsage` 都是只读动作，不需要 `ArkFullAccess` 或账户级计费权限。
 
