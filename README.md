@@ -460,6 +460,13 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.8.1-rc.5** — layout fixes from issue #1: the capsule's `bottom`
+  offset 18px → 60px so it clears the shell's bottom status row, and the
+  plugin now injects `[class*="overlayLayer"]{z-index:1150 !important}` so
+  the shell overlay layer (z-index 20) is no longer covered whole-layer by
+  body-mounted third-party fixed panels (z-index 1000+) — the widget stays
+  inside the React tree, keeping event delegation intact. Both style tags
+  are removed on plugin unload.
 - **v0.8.1-rc.4** — capsule display mode (issue #2 follow-up): the settings
   panel gains 胶囊显示 / "capsule display" (auto = highest window — the
   default, unchanged behavior / 5h window / weekly window / highest). In

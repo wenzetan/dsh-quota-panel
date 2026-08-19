@@ -396,6 +396,11 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.8.1-rc.5** —— issue #1 的两个布局修复：胶囊 `bottom` 偏移 18px → 60px，
+  不再与壳层底部状态行重叠；插件注入
+  `[class*="overlayLayer"]{z-index:1150 !important}`，壳层 overlay 层
+  （z-index 20）不再被 body 直挂的第三方 fixed 面板（z-index 1000+）整层
+  盖住——组件留在 React 树内，事件委托完好。两个 style 标签随插件卸载移除。
 - **v0.8.1-rc.4** —— 胶囊显示模式（issue #2 后续）：设置面板新增「胶囊显示」
   （自动 = 最高窗口（默认，行为不变）/ 5h 窗口 / 周窗口 / 最高窗口）。
   选择 5h / 周窗口时，收起态胶囊的数值、状态灯、进度条与 100% 文案全部

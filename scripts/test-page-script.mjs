@@ -651,6 +651,11 @@ check('B: renderer returns element', element && typeof element.type === 'functio
 	const noRolling = { view: { kind: 'usage', windows: { weekly: { percent: 80, resetsAt: '2026-08-21T12:01:00.000Z' } } } };
 	check('B: capsule rolling on a plan without rolling falls back to highest', rowView(t2, { ...baseSpec, capsuleMode: 'rolling' }, noRolling).summary === '80%');
 	check('B: capsule mode setting + dictionary keys shipped', clientSource.includes('capsuleMode') && clientSource.includes('settingsCapsule') && clientSource.includes('capsuleAuto') && clientSource.includes('capsuleRolling') && clientSource.includes('capsuleWeekly') && clientSource.includes('capsuleMax'));
+	// Layout fixes from issue #1: the capsule must clear the bottom status
+	// row, and the shell overlay layer must not sit UNDER body-mounted
+	// third-party fixed panels (z-index 1000+).
+	check('B: capsule clears the bottom status row (bottom >= 60px)', /#dsh-quota-panel\{[^}]*bottom:([0-9]+)px/.test(clientSource) && Number(clientSource.match(/#dsh-quota-panel\{[^}]*bottom:([0-9]+)px/)[1]) >= 60);
+	check('B: overlay layer lift rule injected (z-index 1150 over body panels)', clientSource.includes('[class*="overlayLayer"]{z-index:1150 !important;}'));
 }
 
 // Surface checks on the bundle source (gear entry, aria, persistence, overlay opt-in).
