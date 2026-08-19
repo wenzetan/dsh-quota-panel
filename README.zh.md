@@ -5,7 +5,7 @@
 **dsh-quota-panel** 是 DeepSeek Harness（DSH）**网页端（`dsh web`）的供应商额度/余额状态组件**。
 它驻留在产品界面右下角，监控你配置过 API Key 的每一个 AI 供应商，
 一眼看清还剩多少余额/额度——DeepSeek、OpenRouter、SiliconFlow、Moonshot、
-StepFun、xAI、智谱 GLM、OpenCode Go，one-api / new-api 风格的聚合站，
+StepFun、xAI、智谱 GLM、OpenCode Go、火山方舟（Agent/Coding Plan），one-api / new-api 风格的聚合站，
 以及各家 **Coding Plan**（智谱 GLM Coding、Z.AI、Kimi Coding、MiniMax
 Coding 国际/国内）：5 小时窗口、周配额与 MCP 月度额度一目了然。
 
@@ -76,10 +76,11 @@ v0.5 起为**双面插件** + **内置供应商目录自动发现**：安装并�
   计划作为独立的 usage 型行接入，显示月度花费（首选 Anthropic Admin API 与
   OpenAI usage API）。
 - **仅 Cookie / CLI 的 Coding Plan** —— 通义 Token Plan（百炼控制台）、小米 MiMo
-  Token Plan、Qoder 与豆包的配额页没有 API-key 查询端点：需要网页 Cookie、
+  Token Plan 与 Qoder 的配额页没有 API-key 查询端点：需要网页 Cookie、
   `arkcli` 命令行或聊天接口限频探测（依据
   [CodexBar](https://github.com/steipete/CodexBar/tree/main/docs) 的调研）。
-  本插件只使用 API key，在官方提供 API-key 端点前无法接入。
+  火山方舟（豆包）的 Agent Plan / Coding Plan 已通过 AK/SK OpenAPI 接入（见上表）。
+  本插件其余供应商只使用 API key/Bearer 认证。
 - **socks5 代理** —— 仅接受 HTTP/HTTPS 代理（socks URL 会被拒绝并给出清晰的单行错误）。
 - **自定义适配器** —— 无法从 profile 扩展新的上游格式；`format` 值超出内置集合时
   在挂载时 fail loud。
@@ -113,7 +114,7 @@ API-key 端点前无法支持。
                │   fetch-all { proxy: {rowId: url} } → 归一化视图
 ┌──────────────▼────────────── host (lib/index.js) ──────┐
 │  ctx.credentials → API Key（绝不离开宿主）              │
-│  目录探测 → 自动发现（14 个内置供应商）                 │
+│  目录探测 → 自动发现（15 个内置供应商）                 │
 │  逐行请求 → 代理引擎（CONNECT 隧道 / 绝对 URI）→ 上游 JSON │
 │  归一化 → {balance | usage | info} 视图模型            │
 └─────────────────────────────────────────────────────────┘
@@ -159,7 +160,9 @@ API-key 端点前无法支持。
 | `providers` | 显式行；同 id 整体替换目录行 | `[]` |
 
 `catalog` 每项可覆盖：`label` / `endpoint` / `format` / `proxy` / `refs`（探测的
-credential 引用名，UPPER_SNAKE）/ `currency`（余额行：币种符号，如 `$`、`US$`）/
+credential 引用名，UPPER_SNAKE）/ `secretRefs`（第二凭据引用，火山方舟 AK/SK 场景使用，
+必须与 `refs` 同时可解析才上板）/ `region`（火山方舟 OpenAPI 区域，默认 `cn-beijing`）/
+`currency`（余额行：币种符号，如 `$`、`US$`）/
 `balanceTiers` / `warnPercent` / `errorPercent` / `windowLabels`。
 
 显式 `providers` 字段：
@@ -169,9 +172,11 @@ credential 引用名，UPPER_SNAKE）/ `currency`（余额行：币种符号，�
 | `id` | 行标识（RPC 行按 id 对齐），`^[a-z0-9-]+$` | 必填 |
 | `label` | 卡片上的提供方名称 | 必填 |
 | `credential` | 凭据引用（`$DSH_HOME/.credentials.yaml` 或环境变量） | 必填 |
+| `secretCredential` | 第二凭据引用（火山方舟 `volcengine-usage` 需要：SK） | — |
 | `endpoint` | 额度 JSON 接口；`openai-billing` 格式时为聚合站 base URL | 必填 |
 | `format` | 行适配器（见下表） | `deepseek-balance` |
 | `proxy` | `proxies` 中定义的代理名；缺省直连 | — |
+| `region` | （`volcengine-usage`）OpenAPI 区域，默认 `cn-beijing` | `cn-beijing` |
 | `currency` | （余额型）币种符号，覆盖 format 默认值 | format 默认 |
 | `balanceTiers` | （余额型）`{critical, warn, healthy}` 分级阈值 | `{10, 20, 50}` |
 | `lowBalance` | 旧版别名，等价于 `balanceTiers.warn` | — |
@@ -196,6 +201,49 @@ credential 引用名，UPPER_SNAKE）/ `currency`（余额行：币种符号，�
 | Z.AI GLM Coding | `ZAI_API_KEY` | `api.z.ai/api/monitor/usage/quota/limit` | 套餐窗口（5h tokens / 周 / MCP 月度） |
 | Kimi Coding | `KIMI_API_KEY` | `api.kimi.com/coding/v1/usages` | 用量%（5h 限频 + 周请求池） |
 | OpenCode Go | `OPENCODE_GO_API_KEY` | `opencode.ai/zen/go/v1/usage` | 三窗口用量% |
+| 火山方舟（Volcengine Ark） | `VOLC_ACCESS_KEY` + `VOLC_SECRET_KEY` | `open.volcengineapi.com`（OpenAPI 签名） | 用量%（Agent Plan 5h/周/月；无则回落 Coding Plan） |
+
+> 火山方舟使用**两组凭据**（AccessKey ID + SecretAccessKey）做 HMAC-SHA256 签名，不是 Bearer Token；推理用的 `ARK_API_KEY`（形如 `ark-...`）不能用于此查询，只有 AK/SK 有 OpenAPI 权限。完整接入步骤见下一节。
+
+#### 火山方舟（Volcengine Ark）接入教程
+
+火山方舟的 Agent Plan / Coding Plan 用量通过**控制面 OpenAPI** 查询，需要一对带只读权限的 AK/SK。配置只需要三步：
+
+**1. 创建 AccessKey**
+
+打开 [https://console.volcengine.com/iam/keymanage](https://console.volcengine.com/iam/keymanage)（火山引擎控制台 → 访问控制 → 访问密钥），点「新建访问密钥」。建议为这个用途**单独创建一对子用户密钥**而不是主账号密钥；完成后把 AccessKey ID 和 SecretAccessKey 保存好（SecretAccessKey 只在创建时显示一次）。
+
+**2. 授予方舟只读权限**
+
+在密钥所属的子用户（或角色）上挂 `ArkReadOnlyAccess` 策略：
+
+- 进入 [访问控制 → 用户](https://console.volcengine.com/iam/user/list)，找到该子用户，点「权限」→「添加权限」；
+- 在「搜索策略名和备注」输入框里输入 `ArkReadOnlyAccess`；
+- 在结果里选**服务来源为「火山方舟」**的那一条（不是全局只读），点确定。
+
+只挂 `ArkReadOnlyAccess` 即可——`GetAFPUsage` / `GetCodingPlanUsage` 都是只读动作，不需要 `ArkFullAccess` 或账户级计费权限。
+
+**3. 写入凭据文件**
+
+在 `$DSH_HOME/.credentials.yaml`（默认 `C:\Users\<你>\.dsh\.credentials.yaml` 或 `~/.dsh/.credentials.yaml`）加两行：
+
+```yaml
+VOLC_ACCESS_KEY: AKLTxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+或者用环境变量 `VOLC_ACCESS_KEY` / `VOLC_SECRET_KEY`（DSH 凭据解析支持环境变量回退）。重启 `dsh web` 后，右下角面板会自动出现「Volcengine Ark」行，无需在插件配置里加 `providers:`。
+
+**怎么验证权限是否正确**
+
+重启后看面板：
+
+- 出现 5h / 周 / 月三条百分比 → AK/SK 与 `ArkReadOnlyAccess` 都生效；
+- 显示 `volcengine SignatureDoesNotMatch: ...` → SK 复制错了（注意尾部的 `=`）；
+- 显示 `volcengine AccessDenied: ...` → 策略没挂上或挂错了来源；
+- 显示 `No active Agent Plan or Coding Plan subscription` → 签名通过但该账号没有订阅 Agent/Coding Plan（按量付费账号就会这样，面板上可以在 ⚙ 设置里隐藏这一行）。
+
+> 安全建议：AK/SK 一旦泄露他人可以读你方舟账号的所有用量数据，贴到聊天/工单/截图前先打码；不再用时去 [密钥管理页](https://console.volcengine.com/iam/keymanage) 禁用并轮换。
 
 另内置 **`openai-billing`** 格式，适配 one-api / new-api 等聚合站：`endpoint` 配
 聚合站 base URL，宿主侧请求 `{base}/v1/dashboard/billing/subscription`
@@ -241,6 +289,7 @@ credential 引用名，UPPER_SNAKE）/ `currency`（余额行：币种符号，�
 | `opencode-usage` | 用量% | `{ usage: { rolling|weekly|monthly: { percent, resetsAt } } }` |
 | `zai-coding-quota` | 用量% | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` —— 语义映射（glm-plan-usage2，issue #2）：TOKENS_LIMIT `unit=3` → 5h 窗口、`unit=6` → 周、TIME_LIMIT → MCP 月度车道；未知 unit 回退按 `nextResetTime` 排序；各窗口百分比优先取 `percentage` 字段 |
 | `kimi-coding-usage` | 用量% | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` —— 5h = `duration=300` 的窗口、周 = `duration=10080`（缺失时回退顶层 usage）；used = limit − remaining |
+| `volcengine-usage` | 用量% | 不走 `adaptRow`：`fetchRow` 内部以 AK/SK HMAC-SHA256 签名调用火山引擎 OpenAPI `GetAFPUsage` → `GetCodingPlanUsage`（回落），解析 `Result.AFPFiveHour/AFPWeekly/AFPMonthly`（Agent Plan，AFPDaily 跳过）或 `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}`（Coding Plan，仅百分比） |
 
 ### 代理（部分供应商无法直连时）
 

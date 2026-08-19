@@ -7,7 +7,7 @@ DeepSeek Harness (DSH) **web surface** (`dsh web`). It sits in the
 bottom-right corner of the product UI, watches every AI provider whose API
 key you have configured, and tells you at a glance how much balance /
 quota is left — DeepSeek, OpenRouter, SiliconFlow, Moonshot, StepFun,
-xAI, Zhipu GLM, OpenCode Go, plus one-api / new-api style aggregators,
+xAI, Zhipu GLM, OpenCode Go, Volcengine Ark (Agent/Coding Plan), plus one-api / new-api style aggregators,
 and the **coding plans** (智谱 GLM Coding, Z.AI, Kimi Coding, MiniMax
 Coding global/CN) with 5-hour / weekly usage windows and MCP monthly quota.
 
@@ -94,12 +94,13 @@ Settings panel (⚙), dark theme:
   usage row kind showing monthly spend (Anthropic Admin API and OpenAI
   usage API first).
 - **Cookie / CLI-only coding plans** — the quota pages of Qwen Token Plan
-  (Bailian console), Xiaomi MiMo Token Plan, Qoder and Doubao expose no
-  API-key quota endpoint: they require web cookies, the `arkcli` CLI, or
-  chat-endpoint rate-limit probes (per
+  (Bailian console), Xiaomi MiMo Token Plan, and Qoder expose no API-key
+  quota endpoint: they require web cookies, the `arkcli` CLI, or chat-endpoint
+  rate-limit probes (per
   [CodexBar](https://github.com/steipete/CodexBar/tree/main/docs) research).
-  This plugin only speaks API keys, so those plans cannot be wired in
-  until an API-key endpoint appears.
+  Volcengine Ark / Doubao Agent Plan and Coding Plan are now supported via
+  the AK/SK-signed OpenAPI (see the catalog table above). Other providers on
+  this list cannot be wired in until an API-key endpoint appears.
 - **socks5 proxies** — only HTTP/HTTPS proxies are accepted (a socks URL
   is rejected with a clear per-row error).
 - **Custom adapters** — new upstream formats cannot be plugged in from the
@@ -139,7 +140,7 @@ an API-key endpoint.
                │   fetch-all { proxy: {rowId: url} } → normalized views
 ┌──────────────▼────────────── host (lib/index.js) ──────┐
 │  ctx.credentials → API keys (never leave the host)      │
-│  catalog probe → auto discovery (14 built-in providers) │
+│  catalog probe → auto discovery (15 built-in providers) │
 │  per-row fetch → proxy engine (CONNECT tunnel /         │
 │                  absolute-URI) → upstream JSON          │
 │  normalization → {balance | usage | info} view models   │
@@ -196,9 +197,12 @@ All keys are optional — the structure and defaults live in the exported
 | `providers` | explicit rows; a same-id entry replaces the catalog row wholesale | `[]` |
 
 Each `catalog` override may set: `label` / `endpoint` / `format` /
-`proxy` / `refs` (credential references to probe, UPPER_SNAKE) / `currency`
-(balance rows: symbol like `$` or `US$`) / `balanceTiers` / `warnPercent` /
-`errorPercent` / `windowLabels`.
+`proxy` / `refs` (credential references to probe, UPPER_SNAKE) /
+`secretRefs` (a second credential reference — required for the Volcengine
+AK/SK pair; the row is only discovered when BOTH `refs` and `secretRefs`
+resolve) / `region` (Volcengine OpenAPI region; default `cn-beijing`) /
+`currency` (balance rows: symbol like `$` or `US$`) / `balanceTiers` /
+`warnPercent` / `errorPercent` / `windowLabels`.
 
 Explicit `providers` fields:
 
@@ -207,9 +211,11 @@ Explicit `providers` fields:
 | `id` | row id (RPC rows align by id), `^[a-z0-9-]+$` | required |
 | `label` | provider name shown on the card | required |
 | `credential` | credential reference (`$DSH_HOME/.credentials.yaml` or environment) | required |
+| `secretCredential` | second credential reference (Volcengine `volcengine-usage`: the SK) | — |
 | `endpoint` | quota JSON endpoint; base URL for `openai-billing` | required |
 | `format` | row adapter (see table below) | `deepseek-balance` |
 | `proxy` | a proxy name defined in `proxies`; absent = direct | — |
+| `region` | (`volcengine-usage`) Volcengine OpenAPI region | `cn-beijing` |
 | `currency` | (balance rows) currency symbol, overrides the format default | format default |
 | `balanceTiers` | (balance rows) `{critical, warn, healthy}` | `{10, 20, 50}` |
 | `lowBalance` | legacy alias for `balanceTiers.warn` | — |
@@ -234,6 +240,75 @@ Explicit `providers` fields:
 | Z.AI GLM Coding | `ZAI_API_KEY` | `api.z.ai/api/monitor/usage/quota/limit` | coding-plan windows (5h tokens / weekly / searches) |
 | Kimi Coding | `KIMI_API_KEY` | `api.kimi.com/coding/v1/usages` | usage % (5h rate limit + weekly request pool) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` | `opencode.ai/zen/go/v1/usage` | three-window usage % |
+| Volcengine Ark (火山方舟) | `VOLC_ACCESS_KEY` + `VOLC_SECRET_KEY` | `open.volcengineapi.com` (OpenAPI, signed) | usage % (Agent Plan 5h/weekly/monthly; falls back to Coding Plan) |
+
+> Volcengine Ark authenticates with an **AccessKey ID / SecretAccessKey pair** using
+> HMAC-SHA256 request signing — not a Bearer token. The inference `ARK_API_KEY`
+> (shaped `ark-...`) cannot query usage; only the AK/SK pair has OpenAPI
+> permission. Full setup is in the next section.
+
+#### Volcengine Ark setup
+
+Ark Agent Plan / Coding Plan usage comes from the **control-plane OpenAPI**,
+which requires an AK/SK pair with read-only access. Three steps:
+
+**1. Create an AccessKey**
+
+Open [https://console.volcengine.com/iam/keymanage](https://console.volcengine.com/iam/keymanage)
+(Volcengine console → Identity and Access Management → Access Keys) and click
+*New access key*. Prefer creating a **sub-user key** dedicated to this plugin
+rather than using the primary account key. Save the AccessKey ID and
+SecretAccessKey when shown — the SecretAccessKey is displayed once.
+
+**2. Grant Ark read-only permission**
+
+Attach the `ArkReadOnlyAccess` policy to the sub-user (or role) that owns the
+key:
+
+- Open [IAM → Users](https://console.volcengine.com/iam/user/list), pick the
+  sub-user, choose *Permissions* → *Add permissions*;
+- In the *Search policy name and remarks* box, type `ArkReadOnlyAccess`;
+- Pick the result whose **service source is "Volcengine Ark"** (not the
+  account-wide read-only policy) and confirm.
+
+`ArkReadOnlyAccess` alone is sufficient — `GetAFPUsage` and
+`GetCodingPlanUsage` are read-only actions; `ArkFullAccess` or account-level
+billing permissions are not required.
+
+**3. Save the credentials**
+
+Add two lines to `$DSH_HOME/.credentials.yaml` (by default
+`C:\Users\<you>\.dsh\.credentials.yaml` on Windows or `~/.dsh/.credentials.yaml`
+on Linux/macOS):
+
+```yaml
+VOLC_ACCESS_KEY: AKLTxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+You can also use the `VOLC_ACCESS_KEY` / `VOLC_SECRET_KEY` environment
+variables (DSH's credential resolver falls back to the environment). Restart
+`dsh web`; the "Volcengine Ark" row appears in the bottom-right panel
+automatically — no `providers:` block required.
+
+**Verifying permissions**
+
+After restart, check the panel:
+
+- Three percentages (5h / weekly / monthly) render → AK/SK and
+  `ArkReadOnlyAccess` are both working;
+- `volcengine SignatureDoesNotMatch: ...` → the SK was copied wrong (watch the
+  trailing `=`);
+- `volcengine AccessDenied: ...` → the policy is not attached or the wrong
+  source policy was selected;
+- `No active Agent Plan or Coding Plan subscription` → the signature worked
+  but the account has no Agent/Coding Plan subscription (typical for pay-as-you-go
+  accounts; hide the row from the ⚙ settings panel).
+
+> Security note: an AK/SK pair can read all Ark usage data for the account.
+> Redact it before pasting into chats, tickets, or screenshots, and rotate it
+> from the [key management page](https://console.volcengine.com/iam/keymanage)
+> when no longer needed.
 
 An additional **`openai-billing`** format adapts one-api / new-api style
 aggregators: set `endpoint` to the aggregator base URL and the host half
@@ -283,6 +358,7 @@ field (e.g. `"US$"`).
 | `opencode-usage` | usage % | `{ usage: { rolling|weekly|monthly: { percent, resetsAt } } }` |
 | `zai-coding-quota` | usage % | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` — semantic mapping (glm-plan-usage2, issue #2): TOKENS_LIMIT `unit=3` → 5h window, `unit=6` → weekly, TIME_LIMIT → MCP monthly lane; unknown units fall back to `nextResetTime` ordering; every window prefers the `percentage` field |
 | `kimi-coding-usage` | usage % | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` — 5h = the `duration=300` window, weekly = `duration=10080` (fallback: top-level usage); used = limit − remaining |
+| `volcengine-usage` | usage % | Dispatched inline in `fetchRow` (not through `adaptRow`): signs and calls the Volcengine Ark OpenAPI `GetAFPUsage`, then falls back to `GetCodingPlanUsage`. Agent Plan parses `Result.AFPFiveHour / AFPWeekly / AFPMonthly` (AFPDaily skipped per the console). Coding Plan parses `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}` (percentages only). |
 
 ### Proxy (providers that cannot be reached directly)
 
