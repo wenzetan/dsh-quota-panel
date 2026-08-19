@@ -68,9 +68,11 @@ Settings panel (⚙), dark theme:
   calm. Usage percentages use battery-style three-color grading, independent
   of the status dots.
 - **Settings panel (⚙)** — per-provider visibility, refresh interval,
-  per-provider warning thresholds, per-provider **HTTP(S) proxy URL**, and
-  "restore defaults". All local settings apply immediately, persist to
-  browser localStorage, and are never written to the profile or uploaded.
+  per-provider warning thresholds, per-provider **HTTP(S) proxy URL**, the
+  **capsule display mode** (auto = highest window — the default — / 5h
+  window / weekly window / highest), and "restore defaults". All local
+  settings apply immediately, persist to browser localStorage, and are
+  never written to the profile or uploaded.
 - **Per-row HTTP(S) proxy** — configure a proxy for providers that cannot
   be reached directly from your network (see below).
 - **One-api / new-api aggregators** — the built-in `openai-billing`
@@ -458,6 +460,14 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.8.1-rc.4** — capsule display mode (issue #2 follow-up): the settings
+  panel gains 胶囊显示 / "capsule display" (auto = highest window — the
+  default, unchanged behavior / 5h window / weekly window / highest). In
+  rolling/weekly modes the collapsed capsule's value, status dot, progress
+  bar and 100% caption all follow the chosen window instead of the highest
+  one, so a 5h capsule no longer glows warn because the weekly pool sits at
+  40%; a plan without the chosen window falls back to the highest. The
+  expanded card always shows every window.
 - **v0.8.1-rc.3** — coding-plan adapter fixes (issue #2, cross-checked with
   [glm-plan-usage2](https://github.com/zwen64657/glm-plan-usage2)):
   `zai-coding-quota` maps windows semantically (TOKENS_LIMIT `unit=3` → 5h,

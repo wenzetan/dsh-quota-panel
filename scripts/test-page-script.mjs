@@ -585,6 +585,65 @@ check('B: locale dictionaries registered (zh + en)', !!localeDicts && localeDict
 const element = registered.renderer({ t: (key) => key });
 check('B: renderer returns element', element && typeof element.type === 'function');
 
+// ---------- B2: capsule display mode (issue #2 follow-up) ----------
+// The collapsed capsule follows capsuleMode: auto/max = highest window
+// (current behavior kept as default), rolling = the 5h window, weekly =
+// the weekly window. Status dot / progress bar / caption align with the
+// SHOWN value, so a 5h capsule does not glow warn because the weekly pool
+// sits at 40%.
+{
+	const patched = clientSource.replace(
+		'exports.apply = apply;',
+		'exports.__rowView = rowView;\nexports.apply = apply;'
+	);
+	const handoffs2 = [];
+	const sandbox2 = {
+		window: { __ModuleLoader__: { load: (h) => handoffs2.push(h) } },
+		globalThis: { localStorage: { getItem: () => null, setItem: () => {} } },
+		document: {
+			createElement: () => ({ dataset: {}, textContent: '', remove: () => {} }),
+			head: { append: () => {} },
+			addEventListener: () => {},
+			removeEventListener: () => {}
+		}
+	};
+	vm.createContext(sandbox2);
+	vm.runInContext(patched, sandbox2);
+	const factoryExports = handoffs2[0].factory((spec) => {
+		if (spec === 'react') return reactStub;
+		throw new Error(`unexpected require: ${spec}`);
+	});
+	const rowView = factoryExports.__rowView;
+	const t2 = (key) => key;
+	const baseSpec = { kind: 'usage', windowLabels: {}, warnPercent: 70, errorPercent: 90 };
+	const entry2 = { view: { kind: 'usage', windows: {
+		rolling: { percent: 1, resetsAt: '2026-08-19T14:20:00.000Z' },
+		weekly: { percent: 40, resetsAt: '2026-08-21T12:01:00.000Z' },
+		monthly: { percent: 1, resetsAt: '2026-08-19T12:01:00.000Z' }
+	} } };
+	const modeView = {};
+	for (const mode of ['auto', 'rolling', 'weekly', 'max']) {
+		modeView[mode] = rowView(t2, { ...baseSpec, capsuleMode: mode }, entry2);
+	}
+	modeView.unset = rowView(t2, { ...baseSpec }, entry2);
+	check('B: capsule auto = highest window (default behavior kept)', modeView.auto.summary === '40%' && modeView.unset.summary === '40%' && modeView.max.summary === '40%');
+	check('B: capsule rolling shows the 5h window', modeView.rolling.summary === '1%' && modeView.rolling.barPercent === 1);
+	check('B: capsule weekly shows the weekly window (not the max)', rowView(t2, { ...baseSpec, capsuleMode: 'weekly' }, { view: { kind: 'usage', windows: { rolling: { percent: 90, resetsAt: '2026-08-19T14:20:00.000Z' }, weekly: { percent: 40, resetsAt: '2026-08-21T12:01:00.000Z' } } } }).summary === '40%');
+	check('B: capsule status aligns with the shown window (5h 1% stays ok despite weekly 40%)', modeView.rolling.status === 'ok' && modeView.auto.status === 'ok');
+	const splitEntry = { view: { kind: 'usage', windows: {
+		rolling: { percent: 10, resetsAt: '2026-08-19T14:20:00.000Z' },
+		weekly: { percent: 75, resetsAt: '2026-08-21T12:01:00.000Z' }
+	} } };
+	check('B: capsule rolling ignores weekly pressure (ok when 5h 10% / weekly 75%)', rowView(t2, { ...baseSpec, capsuleMode: 'rolling' }, splitEntry).status === 'ok');
+	check('B: capsule auto still warns on weekly pressure (warn when weekly 75%)', rowView(t2, { ...baseSpec, capsuleMode: 'auto' }, splitEntry).status === 'warn');
+	const warnEntry = { view: { kind: 'usage', windows: {
+		rolling: { percent: 75, resetsAt: '2026-08-19T14:20:00.000Z' },
+		weekly: { percent: 90, resetsAt: '2026-08-21T12:01:00.000Z' }
+	} } };
+	check('B: capsule rolling warns (not errors) on 5h 75% while weekly 90% errors in auto', rowView(t2, { ...baseSpec, capsuleMode: 'rolling' }, warnEntry).status === 'warn' && rowView(t2, { ...baseSpec, capsuleMode: 'auto' }, warnEntry).status === 'error');
+	check('B: capsule mode setting + dictionary keys shipped', clientSource.includes('capsuleMode') && clientSource.includes('settingsCapsule') && clientSource.includes('capsuleAuto') && clientSource.includes('capsuleRolling') && clientSource.includes('capsuleWeekly') && clientSource.includes('capsuleMax'));
+}
+
 // Surface checks on the bundle source (gear entry, aria, persistence, overlay opt-in).
 const surface = {
 	'gear button ⚙': clientSource.includes('"⚙"'),

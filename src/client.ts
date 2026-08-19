@@ -61,6 +61,12 @@
 				balanceUnavailable: "暂时无法获取余额",
 				balanceAbnormal: "余额数据异常",
 				winRolling: "滚", winWeekly: "周", winMonthly: "月", winSearch: "搜索",
+				settingsCapsule: "胶囊显示",
+				capsuleName: "收起态数值",
+				capsuleAuto: "自动（最高）",
+				capsuleRolling: "5h 窗口",
+				capsuleWeekly: "周窗口",
+				capsuleMax: "最高窗口",
 				noWinData: "无数据",
 				peakUsage: "当前已使用 {pct}%",
 				peakUsageWaiting: "当前已使用 {pct}% 等待重置 {time}",
@@ -103,6 +109,12 @@
 				balanceUnavailable: "Balance unavailable",
 				balanceAbnormal: "Malformed balance data",
 				winRolling: "Roll", winWeekly: "Wk", winMonthly: "Mo", winSearch: "Search",
+				settingsCapsule: "Capsule display",
+				capsuleName: "Collapsed value",
+				capsuleAuto: "Auto (highest)",
+				capsuleRolling: "5h window",
+				capsuleWeekly: "Weekly window",
+				capsuleMax: "Highest window",
 				noWinData: "no data",
 				peakUsage: "Used {pct}%",
 				peakUsageWaiting: "Used {pct}% — awaiting reset {time}",
@@ -190,8 +202,16 @@
 			'#dsh-quota-card .dsh-setting-reset:hover{color:var(--dsw-alias-label-primary,#1b1b1c);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}'
 		].join("\n");
 
+		var CAPSULE_CHOICES = [
+			{ value: "auto" },
+			{ value: "rolling" },
+			{ value: "weekly" },
+			{ value: "max" }
+		];
+		var CAPSULE_MODES = { auto: true, rolling: true, weekly: true, max: true };
+
 		function readSettings() {
-			var base = { hidden: {}, refreshMs: null, warn: {}, proxy: {} };
+			var base = { hidden: {}, refreshMs: null, warn: {}, proxy: {}, capsuleMode: null };
 			try {
 				var raw = globalThis.localStorage.getItem(STORAGE_KEY);
 				if (raw === null) return base;
@@ -201,6 +221,7 @@
 					if (typeof parsed.refreshMs === "number" && Number.isFinite(parsed.refreshMs) && parsed.refreshMs >= 5000) base.refreshMs = parsed.refreshMs;
 					if (parsed.warn && typeof parsed.warn === "object") base.warn = parsed.warn;
 					if (parsed.proxy && typeof parsed.proxy === "object") base.proxy = parsed.proxy;
+					if (typeof parsed.capsuleMode === "string" && CAPSULE_MODES[parsed.capsuleMode]) base.capsuleMode = parsed.capsuleMode;
 				}
 			} catch (err) {}
 			return base;
@@ -242,7 +263,7 @@
 		 * judgement stays client-side so local settings overrides apply
 		 * without a refetch.
 		 */
-		function rowView(t, spec, entry, warnOverride) {
+		function rowView(t, spec, entry, warnOverride, modeOverride) {
 			var kind = spec.kind || "balance";
 			var unavailable = kind === "usage" ? t("usageUnavailable") : kind === "info" ? t("quotaUnavailable") : t("balanceUnavailable");
 			if (!entry || entry.error) {
@@ -274,7 +295,20 @@
 					monthly: localizeWin(specLabels.monthly || t("winMonthly"))
 				};
 				var pcts = effectivePercents(spec, warnOverride);
-				var status = high >= pcts.error ? "error" : high >= pcts.warn ? "warn" : "ok";
+				// Capsule display mode (issue #2 follow-up): which window the
+				// collapsed capsule follows. auto/max keep the historical
+				// highest-window glance; rolling/weekly pin it to one window and
+				// the status dot / bar / caption align with the SHOWN value (a
+				// 5h capsule no longer glows warn because the weekly pool is
+				// high). A window the plan does not carry falls back to the
+				// highest, so nothing regresses for single-window plans.
+				var mode = modeOverride ?? spec.capsuleMode;
+				if (mode !== "rolling" && mode !== "weekly") mode = "auto";
+				var shownPct, shownWin;
+				if (mode === "rolling" && rp !== null) { shownPct = rp; shownWin = w.rolling; }
+				else if (mode === "weekly" && wp !== null) { shownPct = wp; shownWin = w.weekly; }
+				else { shownPct = high; shownWin = null; }
+				var status = shownPct >= pcts.error ? "error" : shownPct >= pcts.warn ? "warn" : "ok";
 				// Weekly absent -> the segment is dropped entirely; the search/MCP
 				// lane unknown (null) -> "-%" instead of a fabricated 0%.
 				var fmtWin = function (label, v) { return label + " " + (v === null ? "—" : v + "%"); };
@@ -288,11 +322,13 @@
 				if (wp !== null) titleLines.push(titleLine(labels.weekly, wp, w.weekly));
 				titleLines.push(titleLine(labels.monthly, mp, w.monthly));
 				// At 100% the caption appends the reset time of the exhausted
-				// window (any window's reset as fallback):
+				// window — the SHOWN window first, then any exhausted one, then
+				// any window's reset as fallback:
 				//   当前已使用 100% 等待重置 2026-08-15 16:00
 				var exhaustedReset = null;
-				if (high >= 100) {
+				if (shownPct >= 100) {
 					var cands = [];
+					if (shownWin && shownWin.resetsAt) cands.push(shownWin.resetsAt);
 					if (rp !== null && rp >= 100 && w.rolling && w.rolling.resetsAt) cands.push(w.rolling.resetsAt);
 					if (wp !== null && wp >= 100 && w.weekly && w.weekly.resetsAt) cands.push(w.weekly.resetsAt);
 					if (mp !== null && mp >= 100 && w.monthly && w.monthly.resetsAt) cands.push(w.monthly.resetsAt);
@@ -305,12 +341,12 @@
 					exhaustedReset = cands.length > 0 ? cands[0] : null;
 				}
 				return {
-					kind: "usage", status: status, summary: high + "%", value: null,
+					kind: "usage", status: status, summary: shownPct + "%", value: null,
 					usageText: textSegs.join(" · "),
-					barPercent: Math.min(Math.max(high, 0), 100),
+					barPercent: Math.min(Math.max(shownPct, 0), 100),
 					caption: exhaustedReset !== null
-						? t("peakUsageWaiting", { pct: high, time: fmtNextReset(t, exhaustedReset) })
-						: t("peakUsage", { pct: high }),
+						? t("peakUsageWaiting", { pct: shownPct, time: fmtNextReset(t, exhaustedReset) })
+						: t("peakUsage", { pct: shownPct }),
 					title: titleLines.join("\n")
 				};
 			}
@@ -402,7 +438,11 @@
 				onChange(Object.assign({}, settings, { proxy: proxy }));
 			};
 
-			var refreshValue = "";
+			var setCapsule = function (value) {
+			onChange(Object.assign({}, settings, { capsuleMode: CAPSULE_MODES[value] ? value : null }));
+		};
+
+		var refreshValue = "";
 			if (settings.refreshMs !== null && settings.refreshMs !== undefined) {
 				var match = REFRESH_CHOICES.some(function (choice) { return Number(choice.value) === settings.refreshMs; });
 				refreshValue = match ? String(settings.refreshMs) : "";
@@ -472,6 +512,21 @@
 							if (choice.value === "120000") label = t("minutesSuffix", { n: 2 });
 							if (choice.value === "300000") label = t("minutesSuffix", { n: 5 });
 							return React.createElement("option", { key: choice.value || "follow", value: choice.value }, label);
+						})))),
+				React.createElement("div", { className: "dsh-setting-section" },
+					React.createElement("div", { className: "dsh-setting-title" }, t("settingsCapsule")),
+					React.createElement("div", { className: "dsh-setting-row" },
+						React.createElement("span", { className: "dsh-setting-name" }, t("capsuleName")),
+						React.createElement("select", {
+							className: "dsh-setting-select",
+							value: settings.capsuleMode || "auto",
+							onChange: function (event) { setCapsule(event.target.value); }
+						}, CAPSULE_CHOICES.map(function (choice) {
+							var label = choice.value === "auto" ? t("capsuleAuto")
+								: choice.value === "rolling" ? t("capsuleRolling")
+								: choice.value === "weekly" ? t("capsuleWeekly")
+								: t("capsuleMax");
+							return React.createElement("option", { key: choice.value, value: choice.value }, label);
 						})))),
 				React.createElement("div", { className: "dsh-setting-section" },
 					React.createElement("div", { className: "dsh-setting-title" }, t("settingsProxy")),
@@ -598,7 +653,7 @@
 					rows = specs.rows.filter(function (spec) { return !settings.hidden[spec.id]; });
 					for (var i = 0; i < specs.rows.length; i++) {
 						var spec = specs.rows[i];
-						views[spec.id] = rowView(t, spec, dataById[spec.id], settings.warn[spec.id]);
+						views[spec.id] = rowView(t, spec, dataById[spec.id], settings.warn[spec.id], settings.capsuleMode);
 					}
 				}
 
@@ -638,7 +693,7 @@
 						specs: specs,
 						settings: settings,
 						onChange: updateSettings,
-						onReset: function () { updateSettings({ hidden: {}, refreshMs: null, warn: {}, proxy: {} }); }
+						onReset: function () { updateSettings({ hidden: {}, refreshMs: null, warn: {}, proxy: {}, capsuleMode: null }); }
 					}));
 				} else if (loadError !== null) {
 					bodyChildren.push(React.createElement("div", { key: "err", className: "dsh-quota-error" }, String(loadError)));
