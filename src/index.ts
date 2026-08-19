@@ -140,8 +140,8 @@ const CATALOG = [
 	{ id: 'stepfun', label: 'StepFun', refs: ['STEP_API_KEY', 'STEPFUN_API_KEY'], endpoint: 'https://api.stepfun.com/v1/accounts', format: 'stepfun-accounts' },
 	{ id: 'xai', label: 'xAI', refs: ['XAI_API_KEY'], endpoint: 'https://api.x.ai/v1/billing/credits', format: 'xai-credits' },
 	{ id: 'zhipu', label: 'ZhiPu GLM', refs: ['ZHIPU_API_KEY', 'GLM_API_KEY'], endpoint: 'https://open.bigmodel.cn/api/monitor/usage/quota/limit', format: 'zhipu-quota' },
-	{ id: 'zai-coding-cn', label: 'ZhiPu GLM Coding', refs: ['ZAI_CODING_CN_API_KEY'], endpoint: 'https://open.bigmodel.cn/api/monitor/usage/quota/limit', format: 'zai-coding-quota', windowLabels: { rolling: '5h', weekly: '周', monthly: '搜索' } },
-	{ id: 'zai', label: 'Z.AI GLM Coding', refs: ['ZAI_API_KEY'], endpoint: 'https://api.z.ai/api/monitor/usage/quota/limit', format: 'zai-coding-quota', windowLabels: { rolling: '5h', weekly: '周', monthly: '搜索' } },
+	{ id: 'zai-coding-cn', label: 'ZhiPu GLM Coding', refs: ['ZAI_CODING_CN_API_KEY'], endpoint: 'https://open.bigmodel.cn/api/monitor/usage/quota/limit', format: 'zai-coding-quota', windowLabels: { rolling: '5h', weekly: '周', monthly: '月' } },
+	{ id: 'zai', label: 'Z.AI GLM Coding', refs: ['ZAI_API_KEY'], endpoint: 'https://api.z.ai/api/monitor/usage/quota/limit', format: 'zai-coding-quota', windowLabels: { rolling: '5h', weekly: '周', monthly: '月' } },
 	{ id: 'kimi-coding', label: 'Kimi Coding', refs: ['KIMI_API_KEY'], endpoint: 'https://api.kimi.com/coding/v1/usages', format: 'kimi-coding-usage', windowLabels: { rolling: '5h', weekly: '周' } },
 	{ id: 'opencode-go', label: 'OpenCode Go', refs: ['OPENCODE_GO_API_KEY'], endpoint: 'https://opencode.ai/zen/go/v1/usage', format: 'opencode-usage' }
 ];
@@ -186,8 +186,13 @@ const FORMATS = {
 			const n = Number(v);
 			return Number.isFinite(n) ? n : NaN;
 		};
-		// MiniMax reports *remaining* counts; some builds return the remaining
-		// value through current_interval_usage_count (documented OpenTokenUsage quirk).
+		// Prefer the coding model row (MiniMax-M*, glm-plan-usage2 filter);
+		// other rows (abab*, embedding…) carry different quota semantics.
+		const name = (m) => String(m?.model_name ?? m?.model ?? '');
+		const coding = remains.find((m) => name(m).startsWith('MiniMax-M')) ?? remains[0];
+		// The remains endpoint family reports REMAINING counts: usage_count is
+		// remaining, used = total - usage_count (documented OpenTokenUsage quirk,
+		// confirmed by glm-plan-usage2).
 		const toIso = (v) => {
 			const n = Number(v);
 			if (Number.isFinite(n)) return new Date(n > 1e12 ? n : n * 1000).toISOString();
@@ -202,11 +207,27 @@ const FORMATS = {
 			if (total > 0 && Number.isFinite(remaining)) return { percent: Math.min(100, Math.round(((total - remaining) / total) * 100)), resetsAt };
 			return null;
 		};
-		const first = remains.map(pick).find((w) => w !== null);
+		const first = pick(coding) ?? remains.map(pick).find((w) => w !== null);
 		if (!first) throw new Error('no usable current_interval fields in model_remains');
+		const windows: Record<string, any> = { rolling: first };
+		// Weekly lane (glm-plan-usage2): old plans report weekly_total_count=0 —
+		// no weekly window then, never a fabricated one.
+		const weeklyTotal = num(coding.current_weekly_total_count);
+		const weeklyRemaining = num(coding.current_weekly_usage_count);
+		if (weeklyTotal > 0 && Number.isFinite(weeklyRemaining)) {
+			windows.weekly = {
+				percent: Math.min(100, Math.round(((weeklyTotal - weeklyRemaining) / weeklyTotal) * 100)),
+				resetsAt: toIso(coding.weekly_end_time)
+			};
+		}
 		const plan = body?.current_subscribe_title ?? body?.plan_name ?? body?.plan;
-		const title = [plan ? `plan: ${plan}` : null, `5h prompts: ${first.percent}% used`].filter(Boolean).join('\n');
-		return { kind: 'usage', windows: { rolling: first }, title };
+		const title = [
+			plan ? `plan: ${plan}` : null,
+			`model: ${name(coding) || '?'}`,
+			`5h prompts: ${first.percent}% used`,
+			windows.weekly ? `weekly prompts: ${windows.weekly.percent}% used` : null
+		].filter(Boolean).join('\n');
+		return { kind: 'usage', windows, title };
 	},
 	'stepfun-accounts': (body) => {
 		const amount = Number(body?.balance);
@@ -242,36 +263,51 @@ const FORMATS = {
 		if (body?.code !== 200) throw new Error(`upstream code ${body?.code}: ${body?.msg ?? 'unknown'}`);
 		const limits = Array.isArray(body?.data?.limits) ? body.data.limits : [];
 		if (limits.length === 0) throw new Error('data.limits is empty');
-		// CodexBar mapping: shortest TOKENS_LIMIT = 5h session window, longest
-		// = weekly; TIME_LIMIT folds into the third slot as the search/MCP lane.
-		const tokens = limits.filter((l) => l.type === 'TOKENS_LIMIT')
-			.sort((a, b) => (Number(a.unit) || 0) * (Number(a.number) || 1) - (Number(b.unit) || 0) * (Number(b.number) || 1));
-		const time = limits.find((l) => l.type === 'TIME_LIMIT');
+		// Semantic window mapping, cross-checked against the official console
+		// (issue #2) and glm-plan-usage2: TOKENS_LIMIT unit=3 is the 5h window,
+		// unit=6 the weekly window, TIME_LIMIT the MCP monthly lane. The former
+		// size heuristic (sort by unit×number, smallest=5h) swaps 5h/weekly on
+		// plans that return both TOKENS_LIMIT rows.
 		const pct = (l) => {
 			const n = Number(l?.percentage);
-			return Number.isFinite(n) ? Math.round(n) : 0;
+			return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : null;
 		};
-		// Search/MCP lane: only a parseable value counts; unknown renders as
-		// null so the client shows "-%" instead of a fabricated 0%.
+		// Fallback percentage from raw counts; null when unparseable so the
+		// client renders "-%" instead of a fabricated 0%.
 		const countPct = (l) => {
 			const used = Number(l?.currentValue);
 			const total = Number(l?.usage);
 			if (Number.isFinite(used) && Number.isFinite(total) && total > 0) return Math.round((used / total) * 100);
-			const p = Number(l?.percentage);
-			return Number.isFinite(p) ? Math.round(p) : null;
+			return null;
 		};
 		const resets = (l) => (Number.isFinite(Number(l?.nextResetTime)) ? new Date(Number(l.nextResetTime)).toISOString() : undefined);
+		const tokens = limits.filter((l) => l.type === 'TOKENS_LIMIT');
+		const time = limits.find((l) => l.type === 'TIME_LIMIT');
+		let rolling = tokens.find((l) => Number(l.unit) === 3);
+		let weekly = tokens.find((l) => Number(l.unit) === 6);
+		if (!rolling && !weekly && tokens.length > 0) {
+			// Unknown unit codes: the 5h window always resets before the weekly
+			// one, so order by nextResetTime instead of guessing by size.
+			const sorted = [...tokens].sort((a, b) => Number(a.nextResetTime ?? Infinity) - Number(b.nextResetTime ?? Infinity));
+			rolling = sorted[0];
+			weekly = sorted.length > 1 ? sorted[sorted.length - 1] : undefined;
+		}
+		const mkWin = (l) => {
+			if (!l) return undefined;
+			const p = pct(l) ?? countPct(l);
+			return { percent: p === null ? null : p, resetsAt: resets(l) };
+		};
 		const windows: Record<string, any> = {};
-		if (tokens.length > 0) windows.rolling = { percent: pct(tokens[0]), resetsAt: resets(tokens[0]) };
-		if (tokens.length > 1) windows.weekly = { percent: pct(tokens[tokens.length - 1]), resetsAt: resets(tokens[tokens.length - 1]) };
-		if (time) windows.monthly = { percent: countPct(time), resetsAt: resets(time) };
+		if (rolling) windows.rolling = mkWin(rolling);
+		if (weekly && weekly !== rolling) windows.weekly = mkWin(weekly);
+		if (time) windows.monthly = mkWin(time);
 		if (Object.keys(windows).length === 0) throw new Error('no TOKENS_LIMIT / TIME_LIMIT entries');
 		const plan = body?.data?.planName ?? body?.data?.plan ?? body?.data?.plan_type ?? body?.data?.packageName ?? body?.data?.level;
 		const title = [
 			plan ? `plan: ${plan}` : null,
-			tokens.length > 0 ? `5h tokens: ${pct(tokens[0])}%` : null,
-			tokens.length > 1 ? `weekly tokens: ${pct(tokens[tokens.length - 1])}%` : null,
-			time && time.currentValue != null && time.usage != null ? `searches: ${time.currentValue}/${time.usage}` : (time ? 'searches: -' : null)
+			windows.rolling ? `5h tokens: ${windows.rolling.percent}%` : null,
+			windows.weekly ? `weekly tokens: ${windows.weekly.percent}%` : null,
+			time ? `MCP monthly: ${Number.isFinite(Number(time.currentValue)) && Number.isFinite(Number(time.usage)) ? `${time.currentValue}/${time.usage} (${windows.monthly.percent}%)` : `${windows.monthly.percent}%`}` : null
 		].filter(Boolean).join('\n');
 		return { kind: 'usage', windows, title };
 	},
@@ -280,16 +316,46 @@ const FORMATS = {
 			const n = Number(v);
 			return Number.isFinite(n) ? n : NaN;
 		};
-		const usage = body?.usage;
-		const limit = num(usage?.limit);
-		const used = num(usage?.used);
-		if (!(limit > 0) || !Number.isFinite(used)) throw new Error('missing usage.limit / usage.used');
-		const windows: Record<string, any> = { weekly: { percent: Math.min(100, Math.round((used / limit) * 100)), resetsAt: usage?.resetTime } };
-		const detail = Array.isArray(body?.limits) && body.limits[0]?.detail ? body.limits[0].detail : null;
-		const sLimit = num(detail?.limit);
-		const sUsed = num(detail?.used);
-		if (sLimit > 0 && Number.isFinite(sUsed)) windows.rolling = { percent: Math.min(100, Math.round((sUsed / sLimit) * 100)), resetsAt: detail?.resetTime };
-		return { kind: 'usage', windows, title: `weekly requests: ${used}/${limit}` + (windows.rolling ? `\n5h requests: ${sUsed}/${sLimit}` : '') };
+		// Window semantics per glm-plan-usage2: limits[] carries both windows,
+		// identified by window.duration (300 = 5h, 10080 = weekly) — never by
+		// array position. Counts are remaining-side: used = limit - remaining
+		// (a `used` field is honored when a build provides it directly).
+		const limits = Array.isArray(body?.limits) ? body.limits : [];
+		const byDuration = (d) => limits.find((l) => Number(l?.window?.duration) === d
+			&& (l?.window?.timeUnit ?? 'TIME_UNIT_MINUTE') === 'TIME_UNIT_MINUTE');
+		const winFromDetail = (detail) => {
+			if (!detail) return null;
+			const limit = num(detail.limit);
+			let used = num(detail.used);
+			if (!Number.isFinite(used)) {
+				const remaining = num(detail.remaining);
+				if (Number.isFinite(remaining) && Number.isFinite(limit)) used = limit - remaining;
+			}
+			if (!(limit > 0) || !Number.isFinite(used)) return null;
+			return { percent: Math.min(100, Math.round((used / limit) * 100)), resetsAt: detail.resetTime };
+		};
+		const windows: Record<string, any> = {};
+		const rolling = winFromDetail(byDuration(300)?.detail);
+		if (rolling) windows.rolling = rolling;
+		let weekly = winFromDetail(byDuration(10080)?.detail);
+		if (!weekly && body?.usage) {
+			// Older shapes only carry the top-level usage aggregate (weekly).
+			const usage = body.usage;
+			const limit = num(usage.limit);
+			let used = num(usage.used);
+			if (!Number.isFinite(used)) {
+				const remaining = num(usage.remaining);
+				if (Number.isFinite(remaining) && Number.isFinite(limit)) used = limit - remaining;
+			}
+			if (limit > 0 && Number.isFinite(used)) weekly = { percent: Math.min(100, Math.round((used / limit) * 100)), resetsAt: usage.resetTime };
+		}
+		if (weekly) windows.weekly = weekly;
+		if (Object.keys(windows).length === 0) throw new Error('no usable windows: limits[].window.duration=300/10080 or usage.limit needed');
+		const title = [
+			windows.rolling ? `5h requests: ${windows.rolling.percent}% used` : null,
+			windows.weekly ? `weekly requests: ${windows.weekly.percent}% used` : null
+		].filter(Boolean).join('\n');
+		return { kind: 'usage', windows, title };
 	}
 };
 

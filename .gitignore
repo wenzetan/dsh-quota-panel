@@ -1,5 +1,6 @@
 node_modules/
 .npm-cache/
+.tmp-npmcheck/
 *.log
 .DS_Store
 .chrome-*/

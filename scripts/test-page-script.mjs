@@ -200,7 +200,7 @@ check('A: coding plan rows discovered', (() => {
 check('A: coding plan kinds and window labels', (() => {
 	const zc = specs.value.rows.find((r) => r.id === 'zai-coding-cn');
 	const km = specs.value.rows.find((r) => r.id === 'kimi-coding');
-	return zc.kind === 'usage' && zc.windowLabels?.rolling === '5h' && zc.windowLabels?.monthly === '搜索'
+	return zc.kind === 'usage' && zc.windowLabels?.rolling === '5h' && zc.windowLabels?.monthly === '月'
 		&& km.kind === 'usage' && km.windowLabels?.rolling === '5h' && km.windowLabels?.monthly === '月';
 })());
 globalThis.fetch = async (url) => {
@@ -291,6 +291,89 @@ check('A: search lane 0% is kept as a real value', (() => {
 	const row = t3.value.rows.find((r) => r.id === 'zai-coding-cn');
 	return row.view?.windows?.monthly?.percent === 0;
 })());
+
+// ---------- A2e: coding-plan window semantics (issue #2 + glm-plan-usage2) ----------
+let q1, q2, q3, q4;
+globalThis.fetch = async (url) => {
+	const s = String(url);
+	if (s.includes('bigmodel') || s.includes('api.z.ai')) {
+		// issue #2 payload: both TOKENS_LIMIT rows + TIME_LIMIT. Official console
+		// says 5h=1%, weekly=40%, MCP monthly=1% — the size heuristic inverts
+		// 5h/weekly and currentValue/usage (16/4000) reads as 0%.
+		return { ok: true, status: 200, json: async () => ({ code: 200, data: { limits: [
+			{ type: 'TIME_LIMIT', unit: 5, number: 1, usage: 4000, currentValue: 16, percentage: 1, nextResetTime: 1893456000000 },
+			{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 1, nextResetTime: 1893456060000 },
+			{ type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 40, nextResetTime: 1894059060000 }
+		] } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { q1 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: zai unit=3 -> rolling, unit=6 -> weekly (not size order)', (() => {
+	const w = q1.value.rows.find((r) => r.id === 'zai-coding-cn')?.view?.windows;
+	return w?.rolling?.percent === 1 && w?.weekly?.percent === 40;
+})());
+check('A: zai TIME_LIMIT monthly prefers the percentage field', (() => {
+	const w = q1.value.rows.find((r) => r.id === 'zai-coding-cn')?.view?.windows;
+	return w?.monthly?.percent === 1;
+})());
+globalThis.fetch = async (url) => {
+	const s = String(url);
+	if (s.includes('bigmodel') || s.includes('api.z.ai')) {
+		// unknown unit codes -> fall back to reset-time ordering (5h always
+		// resets before weekly). Products invert here: unit9x2 < unit7x3.
+		return { ok: true, status: 200, json: async () => ({ code: 200, data: { limits: [
+			{ type: 'TOKENS_LIMIT', unit: 7, number: 3, percentage: 30, nextResetTime: 1893456060000 },
+			{ type: 'TOKENS_LIMIT', unit: 9, number: 2, percentage: 90, nextResetTime: 1894059060000 }
+		] } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { q2 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: zai unknown units -> nearer reset becomes rolling', (() => {
+	const w = q2.value.rows.find((r) => r.id === 'zai-coding-cn')?.view?.windows;
+	return w?.rolling?.percent === 30 && w?.weekly?.percent === 90;
+})());
+globalThis.fetch = async (url) => {
+	if (String(url).includes('api.kimi.com')) {
+		// glm-plan-usage2 shape: weekly window FIRST, no `used`, no top-level usage
+		return { ok: true, status: 200, json: async () => ({ limits: [
+			{ window: { duration: 10080, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '1000', remaining: '400', resetTime: '2026-01-12T00:00:00Z' } },
+			{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '200', remaining: '50', resetTime: '2026-01-06T13:00:00Z' } }
+		] }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { q3 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: kimi rolling = duration-300 window (limit - remaining)', (() => {
+	const w = q3.value.rows.find((r) => r.id === 'kimi-coding')?.view?.windows;
+	return w?.rolling?.percent === 75 && typeof w?.rolling?.resetsAt === 'string';
+})());
+check('A: kimi weekly = duration-10080 window', (() => {
+	const w = q3.value.rows.find((r) => r.id === 'kimi-coding')?.view?.windows;
+	return w?.weekly?.percent === 60 && typeof w?.weekly?.resetsAt === 'string';
+})());
+globalThis.fetch = async (url) => {
+	if (String(url).includes('minimaxi')) {
+		// coding model NOT first; weekly fields only on the coding model row;
+		// no remaining_percent anywhere (older builds)
+		return { ok: true, status: 200, json: async () => ({ base_resp: { status_code: 0, status_msg: '' }, model_remains: [
+			{ model_name: 'abab6.5s-chat', current_interval_total_count: 50, current_interval_usage_count: 10, end_time: 1893456000000 },
+			{ model_name: 'MiniMax-M2.5', current_interval_total_count: 100, current_interval_usage_count: 25, end_time: 1893456060000, current_weekly_total_count: 1000, current_weekly_usage_count: 700, weekly_end_time: 1894059060000 }
+		] }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { q4 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: minimax prefers the MiniMax-M coding model row', (() => {
+	const w = q4.value.rows.find((r) => r.id === 'minimax-cn')?.view?.windows;
+	return w?.rolling?.percent === 75 && typeof w?.rolling?.resetsAt === 'string';
+})());
+check('A: minimax weekly window (weekly usage_count = remaining)', (() => {
+	const w = q4.value.rows.find((r) => r.id === 'minimax-cn')?.view?.windows;
+	return w?.weekly?.percent === 30 && typeof w?.weekly?.resetsAt === 'string';
+})());
+
 
 // hide drops catalog rows
 handler = mount({ hide: ['zhipu'] });

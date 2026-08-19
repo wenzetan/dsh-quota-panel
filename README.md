@@ -9,7 +9,7 @@ key you have configured, and tells you at a glance how much balance /
 quota is left — DeepSeek, OpenRouter, SiliconFlow, Moonshot, StepFun,
 xAI, Zhipu GLM, OpenCode Go, plus one-api / new-api style aggregators,
 and the **coding plans** (智谱 GLM Coding, Z.AI, Kimi Coding, MiniMax
-Coding global/CN) with 5-hour / weekly usage windows and search quota.
+Coding global/CN) with 5-hour / weekly usage windows and MCP monthly quota.
 
 Since v0.5 it is a **dual-face plugin** with a **built-in provider catalog
 and auto discovery**: install it, restart `dsh web`, and every provider
@@ -53,7 +53,7 @@ Settings panel (⚙), dark theme:
   the catalog is probed each refresh cycle.
 - **Coding-plan usage windows** — GLM / Z.AI / Kimi / MiniMax coding
   plans render as usage rows: 5-hour window, weekly pool and (GLM/Z.AI)
-  the web-search lane, each with its own reset countdown; windows the
+  the MCP monthly lane, each with its own reset countdown; windows the
   plan does not carry show `—` instead of a fabricated 0%.
 - **Two sizes** — collapsed: a minimal capsule with one independent
   "status dot + value" pair per account (`● ¥58.36 · ● 45%`); expanded: a
@@ -273,14 +273,14 @@ field (e.g. `"US$"`).
 | `openrouter-credits` | $ balance | `{ data: { total_credits, total_usage } }` |
 | `siliconflow-balance` | balance (¥ by default, per-row currency override) | `{ data: { balance, chargeBalance, totalUsage } }` |
 | `moonshot-balance` | ¥ balance | `{ data: { total_balance } }` |
-| `minimax-remains` | usage % | `{ base_resp, model_remains: [{ current_interval_total_count, current_interval_remaining_percent | …count aliases, end_time }] }` (remaining → used %) |
+| `minimax-remains` | usage % | `{ base_resp, model_remains: [{ model_name, current_interval_total_count, current_interval_usage_count, current_interval_remaining_percent, end_time, current_weekly_total_count, current_weekly_usage_count, weekly_end_time }] }` — coding model row (MiniMax-M\*) preferred; counts are remaining-side (used = total − count); weekly window only when `current_weekly_total_count > 0` |
 | `stepfun-accounts` | ¥ balance | `{ balance, total_cash_balance, total_voucher_balance }` |
 | `xai-credits` | $ balance | `{ total: { val } }` (cents → dollars) |
 | `openai-billing` | $ balance | aggregator `dashboard/billing` endpoints |
 | `zhipu-quota` | text | `{ code: 200, data: { limits: [{ remaining, number }] } }` (limits without `remaining` fall back to `percentage`) |
 | `opencode-usage` | usage % | `{ usage: { rolling|weekly|monthly: { percent, resetsAt } } }` |
-| `zai-coding-quota` | usage % | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` — shortest TOKENS_LIMIT → 5h window, longest → weekly, TIME_LIMIT → search lane |
-| `kimi-coding-usage` | usage % | `{ usage: { limit, used, resetTime }, limits: [{ window, detail: { limit, used, resetTime } }] }` — weekly pool + first 5h window |
+| `zai-coding-quota` | usage % | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` — semantic mapping (glm-plan-usage2, issue #2): TOKENS_LIMIT `unit=3` → 5h window, `unit=6` → weekly, TIME_LIMIT → MCP monthly lane; unknown units fall back to `nextResetTime` ordering; every window prefers the `percentage` field |
+| `kimi-coding-usage` | usage % | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` — 5h = the `duration=300` window, weekly = `duration=10080` (fallback: top-level usage); used = limit − remaining |
 
 ### Proxy (providers that cannot be reached directly)
 
@@ -290,7 +290,9 @@ user:pass allowed), saved to browser localStorage, effective immediately —
 leave it empty to fall back to the profile config or a direct connection.
 Requests still run host-side: the browser sends each row's proxy URL in the
 `fetch-all` payload, the host validates it (http/https only, socks
-rejected) and fetches through it — keys still never leave the host.
+rejected) and fetches through it — keys never reach the browser, but the
+proxy itself can observe them (see [Known issues & risks](#known-issues--risks-proxy-path)
+under Security).
 
 The profile `proxies` map + row-level `proxy` /
 `catalog.<id>.proxy` remain available as **default proxies** (used when
@@ -440,6 +442,13 @@ This plugin builds on community work — thanks to:
   docs (z.ai/GLM coding-plan windows, Kimi Code usage API, MiMo / Qwen /
   Qoder / Doubao auth research) shaped the coding-plan adapters and the
   not-supported list.
+- [zwen64657/glm-plan-usage2](https://github.com/zwen64657/glm-plan-usage2)
+  — Rust GLM usage tracker whose monitor-API research (`docs/api-research.md`
+  real-world samples) pinned the semantic window mapping: TOKENS_LIMIT
+  `unit=3` → 5h, `unit=6` → weekly, TIME_LIMIT → MCP monthly, `percentage`
+  as the authoritative field; its Kimi (`window.duration` 300/10080,
+  `limit − remaining`) and MiniMax (coding-model row, weekly lane) clients
+  informed the matching adapters here (issue #2).
 - [PowerUserZ/OpenTokenUsage](https://github.com/PowerUserZ/OpenTokenUsage)
   — documented the MiniMax `token_plan/remains` response quirks and the
   Kimi Code usage endpoint.
@@ -449,6 +458,19 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.8.1-rc.3** — coding-plan adapter fixes (issue #2, cross-checked with
+  [glm-plan-usage2](https://github.com/zwen64657/glm-plan-usage2)):
+  `zai-coding-quota` maps windows semantically (TOKENS_LIMIT `unit=3` → 5h,
+  `unit=6` → weekly, TIME_LIMIT → the MCP monthly lane; unknown units fall
+  back to `nextResetTime` ordering) instead of the size heuristic that
+  swapped 5h/weekly on plans returning both rows, prefers the `percentage`
+  field for every window, and relabels the third slot 搜索 → 月;
+  `kimi-coding-usage` matches windows by `window.duration` (300 = 5h,
+  10080 = weekly) instead of blind `limits[0]` and computes used as
+  `limit − remaining` (the old code read a nonexistent `detail.used`, so
+  the 5h window silently dropped); `minimax-remains` prefers the
+  `MiniMax-M*` coding model row over whatever comes first and adds the
+  weekly window (`current_weekly_total_count > 0`, remaining-side counts).
 - **v0.8.1-rc.1** — first pre-release on the automatic rc pipeline: 100% usage
   caption appends the reset time (当前已使用 100% 等待重置 …); CI reworked
   (reference dsh-llm-newapi): pre-releases auto-tag + publish to npm `next`
@@ -527,6 +549,40 @@ This plugin builds on community work — thanks to:
   API values never touch `innerHTML`; technical errors (401, timeout,
   missing credential, refused proxy) surface only in `title` tooltips or
   inline row text, and one failing row never affects the others.
+
+### Known issues & risks (proxy path)
+
+The per-row proxy feature has two known risk points you should weigh before
+routing a provider through a proxy:
+
+1. **The upstream `Authorization` header is forwarded to the proxy.** When a
+   row goes through a proxy, the host sends the request headers — including
+   `Authorization: Bearer <key>` — to the proxy server itself: for https
+   targets the key rides in the CONNECT request (outside the TLS tunnel), for
+   http targets in the absolute-URI request. The proxy operator can therefore
+   read every API key routed through it.
+2. **The loopback RPC channel accepts an arbitrary proxy URL per row.** The
+   browser-side proxy field is sent to the host in the `fetch-all` payload
+   and validated only as http/https. Per the platform contract the channel is
+   loopback-only and unauthenticated, so any process that can reach
+   `http://127.0.0.1:3080` can POST a proxy override pointing at an
+   arbitrary server and have the host send your provider keys to it.
+
+**Stay safe:**
+
+- **Use a proxy you fully trust — ideally on your own machine**
+  (`http://127.0.0.1:7890`, e.g. clash / v2rayN). Never point a row at a
+  third-party or public proxy you do not operate: its operator can read your
+  keys (see 1).
+- **Use dedicated API keys** for providers queried through a proxy — separate
+  from keys used anywhere else, with the least privilege your provider offers
+  (billing/balance-only scopes where available), and rotate them if a proxy
+  was ever shared or is suspected compromised.
+- **Run `dsh web` only on machines you trust.** The loopback RPC surface is
+  unauthenticated by design (see 2); don't expose the port to other users or
+  the network.
+- Proxy URLs are stored in browser localStorage as entered — prefer proxies
+  without embedded credentials, or a dedicated local proxy that needs none.
 
 ## TODO
 

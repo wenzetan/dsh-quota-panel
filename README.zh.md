@@ -7,7 +7,7 @@
 一眼看清还剩多少余额/额度——DeepSeek、OpenRouter、SiliconFlow、Moonshot、
 StepFun、xAI、智谱 GLM、OpenCode Go，one-api / new-api 风格的聚合站，
 以及各家 **Coding Plan**（智谱 GLM Coding、Z.AI、Kimi Coding、MiniMax
-Coding 国际/国内）：5 小时窗口、周配额与搜索额度一目了然。
+Coding 国际/国内）：5 小时窗口、周配额与 MCP 月度额度一目了然。
 
 v0.5 起为**双面插件** + **内置供应商目录自动发现**：安装并重启 `dsh web` 后，
 凡是 key 能解析的供应商都会自动出现在面板上——**零配置**。
@@ -58,7 +58,7 @@ v0.5 起为**双面插件** + **内置供应商目录自动发现**：安装并�
   保存在浏览器 localStorage，绝不写入 profile 或上传。
 - **按行 HTTP(S) 代理** —— 为无法直连的供应商配置代理（见下）。
 - **Coding Plan 用量窗口** —— 智谱 / Z.AI / Kimi / MiniMax 套餐渲染为用量行：
-  5 小时窗口、周配额与（GLM/Z.AI）搜索车道，各带重置倒计时；
+  5 小时窗口、周配额与（GLM/Z.AI）MCP 月度车道，各带重置倒计时；
   套餐没有的窗口显示 `—`，绝不伪造 0%。
 - **one-api / new-api 聚合站** —— 内置 `openai-billing` 格式适配聚合站仪表盘。
 - **主题跟随** —— 完全使用 Harness 设计 Token（`--dsw-alias-*`、`--dsw-static-*`、
@@ -186,13 +186,13 @@ credential 引用名，UPPER_SNAKE）/ `currency`（余额行：币种符号，�
 | SiliconFlow（国际） | `SILICONFLOW_API_KEY` | `api.siliconflow.com/v1/user/info` | $余额 |
 | SiliconFlow（国内） | `SILICONFLOW_CN_API_KEY` | `api.siliconflow.cn/v1/user/info` | ¥余额 |
 | Moonshot / Kimi | `MOONSHOT_API_KEY` | `api.moonshot.cn/v1/users/me/balance` | ¥余额 |
-| MiniMax Coding（国际） | `MINIMAX_API_KEY` | `www.minimax.io/v1/token_plan/remains` | 5 小时提示词用量% |
-| MiniMax Coding（国内） | `MINIMAX_CN_API_KEY` | `api.minimaxi.com/v1/token_plan/remains` | 5 小时提示词用量% |
+| MiniMax Coding（国际） | `MINIMAX_API_KEY` | `www.minimax.io/v1/token_plan/remains` | 5h + 周提示词用量% |
+| MiniMax Coding（国内） | `MINIMAX_CN_API_KEY` | `api.minimaxi.com/v1/token_plan/remains` | 5h + 周提示词用量% |
 | StepFun 阶跃 | `STEP_API_KEY` / `STEPFUN_API_KEY` | `api.stepfun.com/v1/accounts` | ¥余额（悬停看现金/赠金） |
 | xAI | `XAI_API_KEY` | `api.x.ai/v1/billing/credits` | $余额 |
 | 智谱 GLM | `ZHIPU_API_KEY` / `GLM_API_KEY` | `open.bigmodel.cn/api/monitor/usage/quota/limit` | 文本行（配额剩余/总数；智谱无公开余额接口） |
-| 智谱 GLM Coding | `ZAI_CODING_CN_API_KEY` | `open.bigmodel.cn/api/monitor/usage/quota/limit` | 套餐窗口（5h tokens / 周 / 搜索） |
-| Z.AI GLM Coding | `ZAI_API_KEY` | `api.z.ai/api/monitor/usage/quota/limit` | 套餐窗口（5h tokens / 周 / 搜索） |
+| 智谱 GLM Coding | `ZAI_CODING_CN_API_KEY` | `open.bigmodel.cn/api/monitor/usage/quota/limit` | 套餐窗口（5h tokens / 周 / MCP 月度） |
+| Z.AI GLM Coding | `ZAI_API_KEY` | `api.z.ai/api/monitor/usage/quota/limit` | 套餐窗口（5h tokens / 周 / MCP 月度） |
 | Kimi Coding | `KIMI_API_KEY` | `api.kimi.com/coding/v1/usages` | 用量%（5h 限频 + 周请求池） |
 | OpenCode Go | `OPENCODE_GO_API_KEY` | `opencode.ai/zen/go/v1/usage` | 三窗口用量% |
 
@@ -232,14 +232,14 @@ credential 引用名，UPPER_SNAKE）/ `currency`（余额行：币种符号，�
 | `openrouter-credits` | $余额 | `{ data: { total_credits, total_usage } }` |
 | `siliconflow-balance` | 余额（默认 ¥，可按行覆盖币种） | `{ data: { balance, chargeBalance, totalUsage } }` |
 | `moonshot-balance` | ¥余额 | `{ data: { total_balance } }` |
-| `minimax-remains` | 用量% | `{ base_resp, model_remains: [{ current_interval_total_count, current_interval_remaining_percent 或各计数别名, end_time }] }`（按剩余反推已用%） |
+| `minimax-remains` | 用量% | `{ base_resp, model_remains: [{ model_name, current_interval_total_count, current_interval_usage_count, current_interval_remaining_percent, end_time, current_weekly_total_count, current_weekly_usage_count, weekly_end_time }] }` —— 优先取 MiniMax-M\* 编码模型行；计数均为剩余侧（已用 = 总量 − 计数）；`current_weekly_total_count > 0` 时才有周窗口 |
 | `stepfun-accounts` | ¥余额 | `{ balance, total_cash_balance, total_voucher_balance }` |
 | `xai-credits` | $余额 | `{ total: { val } }`（分 → 元） |
 | `openai-billing` | $余额 | 聚合站 `dashboard/billing` 两接口 |
 | `zhipu-quota` | 文本 | `{ code: 200, data: { limits: [{ remaining, number }] } }`（无 `remaining` 的条目回退显示 `percentage`） |
 | `opencode-usage` | 用量% | `{ usage: { rolling|weekly|monthly: { percent, resetsAt } } }` |
-| `zai-coding-quota` | 用量% | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` —— 最短 TOKENS_LIMIT → 5h 窗口，最长 → 周，TIME_LIMIT → 搜索车道 |
-| `kimi-coding-usage` | 用量% | `{ usage: { limit, used, resetTime }, limits: [{ window, detail: { limit, used, resetTime } }] }` —— 周请求池 + 第一个 5h 窗口 |
+| `zai-coding-quota` | 用量% | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` —— 语义映射（glm-plan-usage2，issue #2）：TOKENS_LIMIT `unit=3` → 5h 窗口、`unit=6` → 周、TIME_LIMIT → MCP 月度车道；未知 unit 回退按 `nextResetTime` 排序；各窗口百分比优先取 `percentage` 字段 |
+| `kimi-coding-usage` | 用量% | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` —— 5h = `duration=300` 的窗口、周 = `duration=10080`（缺失时回退顶层 usage）；used = limit − remaining |
 
 ### 代理（部分供应商无法直连时）
 
@@ -247,7 +247,7 @@ credential 引用名，UPPER_SNAKE）/ `currency`（余额行：币种符号，�
 （如 `http://127.0.0.1:7890`，可带 user:pass），保存在浏览器 localStorage，即时生效——
 留空即回到 profile 配置或直连。请求仍由宿主侧执行：浏览器把每行的代理 URL 随
 `fetch-all` payload 发给宿主，宿主校验（仅 http/https，socks 拒绝）后经该代理请求
-上游——key 照旧不出宿主。
+上游——key 不进入浏览器（代理本身能看到，见[安全](#安全)中的「已知问题与风险（代理路径）」）。
 
 profile 配置里的 `proxies` + 行级 `proxy` / `catalog.<id>.proxy` 仍可用，
 作为**默认代理**（前端留空时生效）。优先级：**前端设置 > profile 配置 > 直连**。
@@ -381,6 +381,12 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 - [steipete/CodexBar](https://github.com/steipete/CodexBar) —— 其供应商文档
   （z.ai/GLM 套餐窗口语义、Kimi Code 用量接口、MiMo / 通义 / Qoder /
   豆包的认证调研）直接塑造了本插件的套餐适配器与不支持清单。
+- [zwen64657/glm-plan-usage2](https://github.com/zwen64657/glm-plan-usage2)
+  —— Rust 版 GLM 用量工具，其监控接口调研（`docs/api-research.md` 实测
+  响应样本）确认了语义窗口映射：TOKENS_LIMIT `unit=3` → 5h、`unit=6` →
+  周、TIME_LIMIT → MCP 月度、`percentage` 为权威百分比字段；其 Kimi
+  （`window.duration` 300/10080、`limit − remaining`）与 MiniMax（编码
+  模型行、周窗口）客户端逻辑为对应适配器的修复提供了参照（issue #2）。
 - [PowerUserZ/OpenTokenUsage](https://github.com/PowerUserZ/OpenTokenUsage)
   —— 记录了 MiniMax `token_plan/remains` 的响应怪癖与 Kimi Code 用量端点。
 - [schemastery](https://github.com/shigma/schemastery) 与
@@ -389,6 +395,18 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.8.1-rc.3** —— 套餐适配器修复（issue #2，参照
+  [glm-plan-usage2](https://github.com/zwen64657/glm-plan-usage2) 交叉验证）：
+  `zai-coding-quota` 改为语义窗口映射（TOKENS_LIMIT `unit=3` → 5h、
+  `unit=6` → 周、TIME_LIMIT → MCP 月度车道；未知 unit 回退按
+  `nextResetTime` 排序），不再沿用会在同时返回两条 TOKENS_LIMIT 的套餐上
+  对调 5h/周的大小启发式；各窗口百分比优先取 `percentage` 字段；第三槽
+  标签 搜索 → 月。`kimi-coding-usage` 按 `window.duration` 匹配窗口
+  （300 = 5h、10080 = 周），不再盲取 `limits[0]`；已用按
+  `limit − remaining` 计算（旧代码读不存在的 `detail.used`，5h 窗口会
+  静默丢失）。`minimax-remains` 优先取 `MiniMax-M*` 编码模型行，不再
+  盲取第一个模型；补上周窗口（`current_weekly_total_count > 0`，
+  计数为剩余侧）。
 - **v0.8.1-rc.1** —— 自动 rc 管线上的首个预发布：用量达到 100% 时摘要
   追加重置时间（当前已使用 100% 等待重置 …）；CI 重构（参考
   dsh-llm-newapi）：预发布自动打 tag 并发布到 npm `next`（含 `latest`
@@ -450,6 +468,31 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 - 卡片只使用 `createElement`/`textContent` 构建 DOM，API 返回值绝不经过 `innerHTML`；
   技术错误（401、超时、凭据缺失、代理拒绝）只写入 `title` 悬停提示或行内错误文案，
   单行失败不影响其他行。
+
+### 已知问题与风险（代理路径）
+
+按行代理存在两个已知风险点，使用前请知悉：
+
+1. **上游 `Authorization` 头会转发给代理服务器。** 经代理请求时，宿主会把请求头
+   （含 `Authorization: Bearer <key>`）一并发给代理服务器本身：https 目标时 key
+   携带在 CONNECT 请求中（在 TLS 隧道之外），http 目标时携带在绝对 URI 请求中。
+   代理运营方可以看到经过它的全部 API Key。
+2. **回环 RPC 通道逐行接受任意代理 URL。** 前端设置的代理 URL 随 `fetch-all`
+   payload 传给宿主，仅校验 http/https。按平台契约该通道仅回环、无鉴权，因此
+   任何能访问 `http://127.0.0.1:3080` 的本机进程都能 POST 一个指向任意服务器的
+   代理覆盖，诱使宿主把你的供应商 Key 发往该服务器。
+
+**安全使用建议：**
+
+- **只使用你完全信任的代理——最好就在本机**（如 `http://127.0.0.1:7890`，
+  clash / v2rayN）。切勿把行指向非你运营的第三方或公共代理：其运营方可以读取
+  你的 Key（见第 1 点）。
+- **为经代理查询的供应商使用专用 Key**——与其它用途的 Key 隔离，选择供应商提供的
+  最小权限（如仅余额/账单查询的 scope），代理一旦共享过或疑似泄露立即轮换。
+- **只在可信的机器上运行 `dsh web`。** 回环 RPC 面按设计无鉴权（见第 2 点），
+  不要把端口暴露给其他用户或网络。
+- 代理 URL 会原样存入浏览器 localStorage——尽量使用不带账号密码的代理，或使用
+  无需凭据的专用本地代理。
 
 ## 待办
 
