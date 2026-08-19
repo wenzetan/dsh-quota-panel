@@ -641,6 +641,15 @@ check('B: renderer returns element', element && typeof element.type === 'functio
 		weekly: { percent: 90, resetsAt: '2026-08-21T12:01:00.000Z' }
 	} } };
 	check('B: capsule rolling warns (not errors) on 5h 75% while weekly 90% errors in auto', rowView(t2, { ...baseSpec, capsuleMode: 'rolling' }, warnEntry).status === 'warn' && rowView(t2, { ...baseSpec, capsuleMode: 'auto' }, warnEntry).status === 'error');
+	// Plans WITHOUT the chosen window fall back to the highest (single-window
+	// plans like zai-without-weekly must not show a broken capsule).
+	const noWeekly = { view: { kind: 'usage', windows: {
+		rolling: { percent: 30, resetsAt: '2026-08-19T14:20:00.000Z' },
+		monthly: { percent: 5, resetsAt: '2026-08-19T12:01:00.000Z' }
+	} } };
+	check('B: capsule weekly on a plan without weekly falls back to highest', rowView(t2, { ...baseSpec, capsuleMode: 'weekly' }, noWeekly).summary === '30%');
+	const noRolling = { view: { kind: 'usage', windows: { weekly: { percent: 80, resetsAt: '2026-08-21T12:01:00.000Z' } } } };
+	check('B: capsule rolling on a plan without rolling falls back to highest', rowView(t2, { ...baseSpec, capsuleMode: 'rolling' }, noRolling).summary === '80%');
 	check('B: capsule mode setting + dictionary keys shipped', clientSource.includes('capsuleMode') && clientSource.includes('settingsCapsule') && clientSource.includes('capsuleAuto') && clientSource.includes('capsuleRolling') && clientSource.includes('capsuleWeekly') && clientSource.includes('capsuleMax'));
 }
 
