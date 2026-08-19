@@ -268,8 +268,7 @@ key:
 - Open [IAM → Users](https://console.volcengine.com/iam/user/list), pick the
   sub-user, choose *Permissions* → *Add permissions*;
 - In the *Search policy name and remarks* box, type `ArkReadOnlyAccess`;
-- Pick the result whose **service source is "Volcengine Ark"** (not the
-  account-wide read-only policy) and confirm.
+- The result whose **service source is "Volcengine Ark"** is the one you need — check it. There are only two same-named policies in the search results, and checking both is harmless too.
 
 `ArkReadOnlyAccess` alone is sufficient — `GetAFPUsage` and
 `GetCodingPlanUsage` are read-only actions; `ArkFullAccess` or account-level
