@@ -88,7 +88,14 @@ jobs:
           npm init -y >/dev/null
           # --ignore-scripts: the checker's prepack would build TS from its
           # devDependencies; its lib/ is committed, so the pack installs as is.
+          # --registry=npmmirror: 2026-08-21 npmjs CDN split-brain — after the
+          # @deepseek-ai bulk republish, runners resolve STALE packuments
+          # (old dist.integrity) against NEW tarball bytes → EINTEGRITY on
+          # every @deepseek-ai/* 0.1.0-rc.8 dep (5 consecutive red runs). The
+          # mirror is verified self-consistent (tarball == declared sha512).
+          # REVERT to the default registry once npmjs packuments converge.
           npm install --no-audit --no-fund --ignore-scripts \
+            --registry=https://registry.npmmirror.com \
             github:omdsh-dev/dsh-plugin-check \
             @deepseek-ai/dsh-tools \
             @deepseek-ai/dsh-invariants \
@@ -147,7 +154,10 @@ jobs:
         with:
           node-version: 24
       - name: Install dsh and pnpm
-        run: npm install -g @deepseek-ai/dsh pnpm
+        # --registry=npmmirror: same npmjs CDN stale-packument workaround as
+        # the plugin_check step (@deepseek-ai/* deps hit EINTEGRITY on the
+        # default registry since the 2026-08-21 bulk republish). REVERT later.
+        run: npm install -g --registry=https://registry.npmmirror.com @deepseek-ai/dsh pnpm
       - name: Install the packed tarball into a fresh web profile
         run: |
           set -euo pipefail
