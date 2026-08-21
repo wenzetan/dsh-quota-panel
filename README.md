@@ -10,6 +10,10 @@ quota is left — DeepSeek, OpenRouter, SiliconFlow, Moonshot, StepFun,
 xAI, Zhipu GLM, OpenCode Go, Volcengine Ark (Agent/Coding Plan), plus one-api / new-api style aggregators,
 and the **coding plans** (智谱 GLM Coding, Z.AI, Kimi Coding, MiniMax
 Coding global/CN) with 5-hour / weekly usage windows and MCP monthly quota.
+xAI, Zhipu GLM, OpenCode Go, **ChatGPT subscription (Plus/Pro via Codex
+login)**, plus one-api / new-api style aggregators, and the **coding
+plans** (智谱 GLM Coding, Z.AI, Kimi Coding, MiniMax Coding global/CN)
+with 5-hour / weekly usage windows and MCP monthly quota.
 
 Since v0.5 it is a **dual-face plugin** with a **built-in provider catalog
 and auto discovery**: install it, restart `dsh web`, and every provider
@@ -308,6 +312,7 @@ After restart, check the panel:
 > Redact it before pasting into chats, tickets, or screenshots, and rotate it
 > from the [key management page](https://console.volcengine.com/iam/keymanage)
 > when no longer needed.
+| ChatGPT subscription (Plus/Pro) | `~/.codex/auth.json` (Codex login; no API key) | `chatgpt.com/backend-api/wham/usage` | weekly usage % (Pro includes a 5h window) |
 
 An additional **`openai-billing`** format adapts one-api / new-api style
 aggregators: set `endpoint` to the aggregator base URL and the host half
@@ -341,6 +346,40 @@ The currency symbol for balance-kind rows comes from the format by default
 rows carry `currency` (the global SiliconFlow row sets `$`), a `catalog:`
 override may set it, and explicit `providers:` entries accept a `currency`
 field (e.g. `"US$"`).
+
+### ChatGPT subscription (Plus/Pro)
+
+ChatGPT subscription usage is **not** API billing — there is no public
+balance/usage API. This plugin reads the ChatGPT OAuth token from
+`~/.codex/auth.json` (written when you log in via the open-source Codex CLI),
+calls the same internal usage endpoint Codex uses, and shows the **weekly
+window** (and the **5-hour window** on Pro) as a used-percentage row.
+
+> ⚠️ **Experimental.** The endpoint (`chatgpt.com/backend-api/wham/usage`) is
+> an undocumented internal API used by the Codex CLI; its response shape may
+> change. The plugin only performs read-only queries and never modifies your
+> Codex configuration.
+
+**Setup:**
+
+1. Install and log in to the Codex CLI any way you like
+   (`npm i -g @openai/codex`, then run `codex` and complete the ChatGPT login
+   in your browser). This creates `~/.codex/auth.json`;
+2. No key in `.credentials.yaml` is needed — the plugin auto-detects
+   `auth.json` and shows the ChatGPT row whenever it exists;
+3. Restart `dsh web`. A "ChatGPT" row appears; hover to see `plan: plus/pro`
+   and `weekly: N%` (Pro also shows a 5h window).
+
+How it works: when the access token expires, the plugin refreshes it via
+`auth.openai.com/oauth/token` using the refresh token in `auth.json`. Refreshed
+tokens stay in the plugin process memory only and are **never written back** to
+`auth.json` (that file is owned by the Codex CLI). If refresh fails (e.g. you
+logged in elsewhere and invalidated the token), the row shows an error — just
+run `codex` to log in again and it recovers.
+
+If the `CODEX_HOME` environment variable points at a custom directory, the
+plugin reads from `$CODEX_HOME/auth.json`.
+
 ### Built-in formats
 
 | format | Row kind | Upstream response shape |
@@ -358,6 +397,7 @@ field (e.g. `"US$"`).
 | `zai-coding-quota` | usage % | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` — semantic mapping (glm-plan-usage2, issue #2): TOKENS_LIMIT `unit=3` → 5h window, `unit=6` → weekly, TIME_LIMIT → MCP monthly lane; unknown units fall back to `nextResetTime` ordering; every window prefers the `percentage` field |
 | `kimi-coding-usage` | usage % | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` — 5h = the `duration=300` window, weekly = `duration=10080` (fallback: top-level usage); used = limit − remaining |
 | `volcengine-usage` | usage % | Dispatched inline in `fetchRow` (not through `adaptRow`): signs and calls the Volcengine Ark OpenAPI `GetAFPUsage`, then falls back to `GetCodingPlanUsage`. Agent Plan parses `Result.AFPFiveHour / AFPWeekly / AFPMonthly` (AFPDaily skipped per the console). Coding Plan parses `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}` (percentages only). |
+| `chatgpt-subscription` | usage % | `{ plan_type, rate_limit: { primary_window: { used_percent, reset_at }, secondary_window? } }` — read via the OAuth token in `~/.codex/auth.json` against Codex's internal usage endpoint; primary maps to the weekly window, secondary (Pro) to the 5h window. Experimental |
 
 ### Proxy (providers that cannot be reached directly)
 

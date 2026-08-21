@@ -72,6 +72,9 @@
  * repo's real path, which cannot walk up to dsh's bundled packages.
  */
 import crypto from 'node:crypto';
+import { promises as fsp } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -189,6 +192,92 @@ function volcengineSignedHeaders(ak: string, sk: string, region: string, action:
 	};
 }
 
+// ── ChatGPT subscription (Codex OAuth) usage ────────────────
+//
+// ChatGPT Plus/Pro/Business plans have no public usage API, but the
+// official open-source Codex CLI authenticates against an EXPERIMENTAL
+// internal endpoint that returns the current plan's rate-limit windows:
+//
+//   GET https://chatgpt.com/backend-api/wham/usage
+//   Authorization: Bearer <ChatGPT OAuth access_token>
+//   ChatGPT-Account-Id: <account_id>
+//
+// Tokens live in `~/.codex/auth.json` (written by `codex login`). The
+// access token is short-lived; we refresh it via the standard OAuth
+// token endpoint using the refresh_token from the same file. The
+// refreshed tokens are kept in an in-memory cache only — we do NOT
+// write back to auth.json, because that file is owned by the Codex CLI
+// (matching the ownership boundary CodexBar documents).
+//
+// This adapter is explicitly experimental: the endpoint/shape are not
+// a public contract and may drift. Field names are verified against
+// live responses (2026-08) and the openai/codex client.
+const CHATGPT_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+const CHATGPT_TOKEN_URL = 'https://auth.openai.com/oauth/token';
+const CHATGPT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+/** Directory containing auth.json; honors CODEX_HOME like the Codex CLI. */
+function chatgptCodexHome(): string {
+	const override = process.env.CODEX_HOME;
+	return override && override.length > 0 ? override : path.join(os.homedir(), '.codex');
+}
+/** Absolute path to the Codex auth.json. Resolved lazily so tests can steer via CODEX_HOME. */
+function chatgptAuthJsonPath(): string {
+	return path.join(chatgptCodexHome(), 'auth.json');
+}
+/** Returns true when the local Codex auth file exists (row auto-discovery probe). */
+async function chatgptAuthExists(): Promise<boolean> {
+	try {
+		await fsp.access(chatgptAuthJsonPath());
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+interface ChatGPTTokenBundle {
+	access_token: string;
+	refresh_token?: string;
+	id_token?: string;
+	account_id?: string;
+	/** epoch ms when the access token expires (if known). */
+	expires_at_ms?: number;
+}
+
+/** In-memory token cache; refreshed on expiry or on auth failure. */
+let chatgptTokenCache: { bundle: ChatGPTTokenBundle } | null = null;
+
+async function readChatGPTAuthFile(): Promise<ChatGPTTokenBundle> {
+	const authJson = chatgptAuthJsonPath();
+	let raw: string;
+	try {
+		raw = await fsp.readFile(authJson, 'utf8');
+	} catch (err) {
+		throw new Error(`ChatGPT: cannot read ${authJson} (run "codex login" first): ${(err as Error).message}`);
+	}
+	let parsed: any;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new Error(`ChatGPT: ${authJson} is not valid JSON`);
+	}
+	const tokens = parsed?.tokens;
+	if (!tokens || typeof tokens !== 'object' || typeof tokens.access_token !== 'string' || tokens.access_token.length === 0) {
+		throw new Error(`ChatGPT: ${authJson} has no tokens.access_token (run "codex login")`);
+	}
+	let expires_at_ms: number | undefined;
+	if (typeof tokens.expires_at === 'number' && Number.isFinite(tokens.expires_at) && tokens.expires_at > 0) {
+		// Codex writes epoch seconds; tolerate ms.
+		expires_at_ms = tokens.expires_at > 1e12 ? tokens.expires_at : tokens.expires_at * 1000;
+	}
+	return {
+		access_token: tokens.access_token,
+		refresh_token: typeof tokens.refresh_token === 'string' ? tokens.refresh_token : undefined,
+		id_token: typeof tokens.id_token === 'string' ? tokens.id_token : undefined,
+		account_id: typeof tokens.account_id === 'string' ? tokens.account_id : undefined,
+		expires_at_ms
+	};
+}
+
 /**
  * Call one Volcengine Ark OpenAPI action (POST with empty body, signed).
  * Volcengine returns business errors as 200 + ResponseMetadata.Error, so
@@ -221,6 +310,126 @@ async function volcengineCall(action: string, region: string, ak: string, sk: st
 }
 
 /**
+ * Exchange a refresh_token for a fresh access token at the OpenAI OAuth
+ * endpoint. Form-urlencoded as required by the OAuth2 token endpoint.
+ */
+async function refreshChatGPTToken(refreshToken: string, timeoutMs: number): Promise<ChatGPTTokenBundle> {
+	const body = new URLSearchParams({
+		grant_type: 'refresh_token',
+		refresh_token: refreshToken,
+		client_id: CHATGPT_CLIENT_ID
+	}).toString();
+	const res = await fetch(CHATGPT_TOKEN_URL, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body,
+		signal: AbortSignal.timeout(timeoutMs)
+	});
+	const json: any = await res.json().catch(() => null);
+	if (!res.ok || json === null) {
+		const msg = json?.error_description || json?.error || `HTTP ${res.status}`;
+		throw new Error(`ChatGPT token refresh failed: ${msg}`);
+	}
+	if (typeof json.access_token !== 'string' || json.access_token.length === 0) {
+		throw new Error('ChatGPT token refresh response missing access_token');
+	}
+	const expiresIn = Number(json.expires_in);
+	return {
+		access_token: json.access_token,
+		refresh_token: typeof json.refresh_token === 'string' ? json.refresh_token : refreshToken,
+		id_token: typeof json.id_token === 'string' ? json.id_token : undefined,
+		expires_at_ms: Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1000 : undefined
+	};
+}
+
+/**
+ * Resolve a usable access token: cache hit while fresh, else reload from
+ * auth.json (which Codex may have refreshed in the meantime), else refresh
+ * via the OAuth endpoint using the stored refresh_token. Refreshed tokens
+ * are cached in memory only.
+ */
+async function resolveChatGPTToken(timeoutMs: number): Promise<{ accessToken: string; accountId?: string }> {
+	const now = Date.now();
+	const cached = chatgptTokenCache?.bundle;
+	if (cached && cached.access_token && (!cached.expires_at_ms || cached.expires_at_ms - now > 30_000)) {
+		return { accessToken: cached.access_token, accountId: cached.account_id };
+	}
+	const fromDisk = await readChatGPTAuthFile();
+	if (!fromDisk.expires_at_ms || fromDisk.expires_at_ms - now > 30_000) {
+		chatgptTokenCache = { bundle: fromDisk };
+		return { accessToken: fromDisk.access_token, accountId: fromDisk.account_id };
+	}
+	// Disk token is expired/near-expiry — refresh.
+	if (!fromDisk.refresh_token) {
+		throw new Error('ChatGPT: access token expired and auth.json has no refresh_token — run "codex login" again');
+	}
+	const refreshed = await refreshChatGPTToken(fromDisk.refresh_token, timeoutMs);
+	if (!refreshed.account_id) refreshed.account_id = fromDisk.account_id;
+	chatgptTokenCache = { bundle: refreshed };
+	return { accessToken: refreshed.access_token, accountId: refreshed.account_id };
+}
+
+/**
+ * Call the experimental ChatGPT usage endpoint. On a 401 the caller may
+ * retry once after forcing a token refresh.
+ */
+async function fetchChatGPTUsage(accessToken: string, accountId: string | undefined, timeoutMs: number): Promise<any> {
+	const headers: Record<string, string> = {
+		'Authorization': `Bearer ${accessToken}`,
+		'Accept': 'application/json'
+	};
+	if (accountId) headers['ChatGPT-Account-Id'] = accountId;
+	const res = await fetch(CHATGPT_USAGE_URL, { headers, signal: AbortSignal.timeout(timeoutMs) });
+	const body: any = await res.json().catch(() => null);
+	if (res.status === 401) {
+		const err: any = new Error('ChatGPT: access token rejected (401)');
+		err.code = 'chatgpt-auth';
+		throw err;
+	}
+	if (body === null) throw new Error(`ChatGPT: HTTP ${res.status} non-JSON response`);
+	if (!res.ok) throw new Error(`ChatGPT: HTTP ${res.status}: ${body?.detail || body?.error || 'unknown error'}`);
+	return body;
+}
+
+/**
+ * Normalize a wham/usage response into the plugin's usage view.
+ * primary_window is the weekly allowance; secondary_window (Pro plans)
+ * is the shorter 5h window. We surface primary as `weekly` and, when
+ * present, secondary as `rolling`, matching the coding-plan convention.
+ */
+function parseChatGPTUsage(body: any): { kind: 'usage'; windows: Record<string, any>; title: string } | null {
+	const rl = body?.rate_limit;
+	if (!rl || typeof rl !== 'object') return null;
+	const toIso = (epochSec: unknown) => {
+		const n = Number(epochSec);
+		if (!Number.isFinite(n) || n <= 0) return undefined;
+		return new Date(n > 1e12 ? n : n * 1000).toISOString();
+	};
+	const mapWindow = (w: any) => {
+		if (!w || typeof w !== 'object') return null;
+		const pct = Number(w.used_percent);
+		if (!Number.isFinite(pct)) return null;
+		return {
+			percent: Math.min(100, Math.max(0, Math.round(pct))),
+			resetsAt: toIso(w.reset_at)
+		};
+	};
+	const windows: Record<string, any> = {};
+	const primary = mapWindow(rl.primary_window);
+	if (primary) windows.weekly = primary;
+	const secondary = mapWindow(rl.secondary_window);
+	if (secondary) windows.rolling = secondary;
+	if (Object.keys(windows).length === 0) return null;
+	const plan = typeof body?.plan_type === 'string' && body.plan_type ? body.plan_type : 'subscription';
+	const titleParts = [
+		`plan: ${plan}`,
+		windows.rolling ? `5h: ${windows.rolling.percent}%` : null,
+		windows.weekly ? `weekly: ${windows.weekly.percent}%` : null
+	].filter(Boolean);
+	return { kind: 'usage', windows, title: titleParts.join('\n') };
+}
+
+/**
  * Normalized row views an adapter may produce. The browser half renders
  * these generically; upstream response schema details never leave the host.
  * @typedef {object} RowView
@@ -248,7 +457,8 @@ const FORMAT_META = {
 	'opencode-usage': { kind: 'usage' },
 	'zai-coding-quota': { kind: 'usage' },
 	'kimi-coding-usage': { kind: 'usage' },
-	'volcengine-usage': { kind: 'usage' }
+	'volcengine-usage': { kind: 'usage' },
+	'chatgpt-subscription': { kind: 'usage' }
 };
 
 /**
@@ -275,11 +485,17 @@ const CATALOG = [
 	// OpenAPI control plane. Unlike every other catalog row this one
 	// authenticates with an AK/SK pair (signed, not Bearer) —
 	// `secretRefs` is the second credential and fetchRow signs the request.
-	{ id: 'volcengine', label: 'Volcengine Ark', refs: ['VOLC_ACCESS_KEY'], secretRefs: ['VOLC_SECRET_KEY'], endpoint: 'https://open.volcengineapi.com', format: 'volcengine-usage', windowLabels: { rolling: '5h', weekly: '周', monthly: '月' } }
+	{ id: 'volcengine', label: 'Volcengine Ark', refs: ['VOLC_ACCESS_KEY'], secretRefs: ['VOLC_SECRET_KEY'], endpoint: 'https://open.volcengineapi.com', format: 'volcengine-usage', windowLabels: { rolling: '5h', weekly: '周', monthly: '月' } },
+	// ChatGPT subscription (Plus/Pro/Business via Codex OAuth). Unlike every
+	// other row this does NOT use ctx.credentials: tokens are read from
+	// ~/.codex/auth.json (written by `codex login`) and refreshed host-side.
+	// `localAuth: 'codex'` makes resolveRows skip credential probing and always
+	// surface the row (the row errors at fetch time if auth.json is missing).
+	{ id: 'chatgpt', label: 'ChatGPT', localAuth: 'codex', endpoint: CHATGPT_USAGE_URL, format: 'chatgpt-subscription', windowLabels: { rolling: '5h', weekly: '周' } }
 ];
 
 /** Keys a `catalog` override may set on an auto-discovered row. */
-const CATALOG_OVERRIDE_KEYS = ['label', 'endpoint', 'format', 'proxy', 'refs', 'secretRefs', 'currency', 'balanceTiers', 'warnPercent', 'errorPercent', 'windowLabels'];
+const CATALOG_OVERRIDE_KEYS = ['label', 'endpoint', 'format', 'proxy', 'refs', 'secretRefs', 'currency', 'balanceTiers', 'warnPercent', 'errorPercent', 'windowLabels', 'localAuth'];
 
 /**
  * Format adapters: upstream JSON → RowView. Each returns a view or throws
@@ -496,6 +712,11 @@ const FORMATS = {
 	// format is registered in FORMATS/FORMAT_META for config validation.
 	'volcengine-usage': () => {
 		throw new Error('volcengine-usage is handled inline by fetchRow');
+	},
+	// chatgpt-subscription is dispatched inline in fetchRow because it uses
+	// an OAuth token from ~/.codex/auth.json (with refresh), not ctx.credentials.
+	'chatgpt-subscription': () => {
+		throw new Error('chatgpt-subscription is handled inline by fetchRow');
 	}
 };
 
@@ -515,17 +736,18 @@ export const Config = z.object({
 		label: z.string().required(),
 		credential: z.string().role('credential-ref').required(),
 		secretCredential: z.string().role('credential-ref'),
+		region: z.string(),
+		localAuth: z.union([z.const('codex')]),
 		endpoint: z.string().pattern(HTTP_URL_PATTERN).required(),
 		format: z.union([
 			z.const('deepseek-balance'), z.const('openrouter-credits'), z.const('siliconflow-balance'),
 			z.const('moonshot-balance'), z.const('minimax-remains'), z.const('stepfun-accounts'),
 			z.const('xai-credits'), z.const('openai-billing'), z.const('zhipu-quota'),
 			z.const('opencode-usage'), z.const('zai-coding-quota'), z.const('kimi-coding-usage'),
-			z.const('volcengine-usage')
+			z.const('volcengine-usage'), z.const('chatgpt-subscription')
 		]).default('deepseek-balance'),
 		proxy: z.string(),
 		currency: z.string(),
-		region: z.string(),
 		balanceTiers: z.object({
 			critical: z.number().default(10),
 			warn: z.number().default(20),
@@ -820,24 +1042,40 @@ async function resolveRows(ctx, raw) {
 			if (raw.hide.includes(entry.id) || explicitIds.has(entry.id)) continue;
 			const override = raw.catalog[entry.id] || {};
 			const merged = { ...entry, ...override };
-			const hit = await firstResolvedRef(ctx, merged.refs);
-			if (!hit) continue;
-			// Two-credential rows (e.g. Volcengine AK/SK): the row is only
-			// discoverable once BOTH refs resolve. The resolved ref NAME is
-			// stored (not the value); fetchRow re-resolves per cycle.
+
+			let credentialRef: string | undefined;
 			let secretCredential: string | undefined;
-			if (Array.isArray(merged.secretRefs) && merged.secretRefs.length > 0) {
-				const secretHit = await firstResolvedRef(ctx, merged.secretRefs);
-				if (!secretHit) continue;
-				secretCredential = secretHit.ref;
+
+			if (merged.localAuth) {
+				// localAuth rows (ChatGPT via ~/.codex/auth.json) probe the
+				// local auth source each cycle; they join the panel only when
+				// that source exists. They surface their own fetch error if
+				// the file later disappears or is malformed.
+				if (merged.localAuth === 'codex' && !(await chatgptAuthExists())) continue;
+				credentialRef = undefined;
+			} else {
+				// Bearer/key rows: the primary ref must resolve. Two-credential
+				// rows (e.g. Volcengine AK/SK) require BOTH refs; the resolved
+				// ref NAME is stored (not the value); fetchRow re-resolves per
+				// cycle.
+				const hit = await firstResolvedRef(ctx, merged.refs);
+				if (!hit) continue;
+				credentialRef = hit.ref;
+				if (Array.isArray(merged.secretRefs) && merged.secretRefs.length > 0) {
+					const secretHit = await firstResolvedRef(ctx, merged.secretRefs);
+					if (!secretHit) continue;
+					secretCredential = secretHit.ref;
+				}
 			}
+
 			const at = `quota-panel: config.catalog.${entry.id}`;
 			rows.push({
 				id: merged.id,
 				label: merged.label,
-				credential: hit.ref,
+				credential: credentialRef,
 				secretCredential,
 				region: merged.region,
+				localAuth: merged.localAuth,
 				endpoint: merged.endpoint,
 				format: merged.format,
 				proxy: merged.proxy,
@@ -958,6 +1196,37 @@ function adaptRow(format, body) {
  */
 async function fetchRow(ctx, provider, proxies, clientProxyUrl) {
 	try {
+		// ── ChatGPT subscription (Codex OAuth) ──────────────────
+		// Reads tokens from ~/.codex/auth.json, refreshes host-side,
+		// and queries the experimental wham/usage endpoint. On a 401
+		// we force a single token refresh retry.
+		if (provider.format === 'chatgpt-subscription') {
+			try {
+				let { accessToken, accountId } = await resolveChatGPTToken(UPSTREAM_TIMEOUT_MS);
+				let body: any;
+				try {
+					body = await fetchChatGPTUsage(accessToken, accountId, UPSTREAM_TIMEOUT_MS);
+				} catch (e) {
+					if ((e as any)?.code === 'chatgpt-auth') {
+						// Drop the cached token and refresh once.
+						chatgptTokenCache = null;
+						const refreshed = await resolveChatGPTToken(UPSTREAM_TIMEOUT_MS);
+						accessToken = refreshed.accessToken;
+						accountId = refreshed.accountId;
+						body = await fetchChatGPTUsage(accessToken, accountId, UPSTREAM_TIMEOUT_MS);
+					} else {
+						throw e;
+					}
+				}
+				const view = parseChatGPTUsage(body);
+				if (!view) {
+					return { id: provider.id, error: 'ChatGPT: no rate_limit data in usage response' };
+				}
+				return { id: provider.id, view };
+			} catch (e) {
+				return { id: provider.id, error: String((e && (e as Error).message) || e) };
+			}
+		}
 		const hit = await ctx.credentials.resolve(provider.credential);
 		if (!hit || typeof hit.value !== 'string' || hit.value.length === 0) {
 			return { id: provider.id, error: `${provider.credential} is not configured` };

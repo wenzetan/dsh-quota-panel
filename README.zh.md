@@ -8,6 +8,10 @@
 StepFun、xAI、智谱 GLM、OpenCode Go、火山方舟（Agent/Coding Plan），one-api / new-api 风格的聚合站，
 以及各家 **Coding Plan**（智谱 GLM Coding、Z.AI、Kimi Coding、MiniMax
 Coding 国际/国内）：5 小时窗口、周配额与 MCP 月度额度一目了然。
+StepFun、xAI、智谱 GLM、OpenCode Go、**ChatGPT 订阅（Plus/Pro，经 Codex 登录）**，
+one-api / new-api 风格的聚合站，以及各家 **Coding Plan**（智谱 GLM Coding、Z.AI、
+Kimi Coding、MiniMax Coding 国际/国内、火山方舟 Agent/Coding Plan）：5 小时窗口、
+周配额与 MCP 月度额度一目了然。
 
 v0.5 起为**双面插件** + **内置供应商目录自动发现**：安装并重启 `dsh web` 后，
 凡是 key 能解析的供应商都会自动出现在面板上——**零配置**。
@@ -244,6 +248,7 @@ VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - 显示 `No active Agent Plan or Coding Plan subscription` → 签名通过但该账号没有订阅 Agent/Coding Plan（按量付费账号就会这样，面板上可以在 ⚙ 设置里隐藏这一行）。
 
 > 安全建议：AK/SK 一旦泄露他人可以读你方舟账号的所有用量数据，贴到聊天/工单/截图前先打码；不再用时去 [密钥管理页](https://console.volcengine.com/iam/keymanage) 禁用并轮换。
+| ChatGPT 订阅（Plus/Pro） | `~/.codex/auth.json`（Codex 登录，无需 API Key） | `chatgpt.com/backend-api/wham/usage` | 周用量%（Pro 含 5h 窗口） |
 
 另内置 **`openai-billing`** 格式，适配 one-api / new-api 等聚合站：`endpoint` 配
 聚合站 base URL，宿主侧请求 `{base}/v1/dashboard/billing/subscription`
@@ -273,6 +278,36 @@ VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 可按行覆盖：目录行自带 `currency`（SiliconFlow 国际行设为 `$`），
 `catalog:` 覆盖可设置，显式 `providers:` 条目接受 `currency` 字段
 （如 `"US$"`）。
+
+### ChatGPT 订阅（Plus/Pro）接入
+
+ChatGPT 订阅用量**不是 API 计费**，没有公开的余额/用量 API。本插件通过
+官方开源 Codex CLI 登录后写入的 `~/.codex/auth.json`，读取 ChatGPT OAuth
+令牌，调用 Codex 同款的内部用量端点，把 Plus/Pro 套餐的**周窗口（及 Pro
+的 5 小时窗口）已用百分比**显示在面板上。
+
+> ⚠️ **实验性（experimental）**：该端点（`chatgpt.com/backend-api/wham/usage`）
+> 是 Codex CLI 内部使用的未公开接口，响应字段可能随官方调整而变化。本插件
+> 只做只读查询，不会写入或修改你的 Codex 配置。
+
+**接入步骤：**
+
+1. 安装并登录 Codex CLI（任意方式：`npm i -g @openai/codex` 后运行 `codex`，
+   在浏览器完成 ChatGPT 登录）。登录会生成 `~/.codex/auth.json`；
+2. 无需在 `.credentials.yaml` 里配置任何 Key——插件自动探测 `auth.json`，
+   存在就显示 ChatGPT 行；
+3. 重启 `dsh web`。面板出现「ChatGPT」行，悬停可见 `plan: plus/pro` 与
+   `weekly: N%`（Pro 还会有 5h 窗口）。
+
+工作机制：access token 过期时，插件用 `auth.json` 里的 refresh token 向
+`auth.openai.com/oauth/token` 自动刷新；刷新后的令牌仅保存在插件进程内存中，
+**不会回写** `auth.json`（该文件归 Codex CLI 所有）。若 refresh 也失败
+（例如在别处重新登录导致令牌失效），面板会显示错误，重新运行一次 `codex`
+登录即可恢复。
+
+如果 `CODEX_HOME` 环境变量指向了自定义目录，插件会从
+`$CODEX_HOME/auth.json` 读取。
+
 ### 内置 format
 
 | format | 行类型 | 上游响应形态 |
@@ -290,6 +325,7 @@ VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 | `zai-coding-quota` | 用量% | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` —— 语义映射（glm-plan-usage2，issue #2）：TOKENS_LIMIT `unit=3` → 5h 窗口、`unit=6` → 周、TIME_LIMIT → MCP 月度车道；未知 unit 回退按 `nextResetTime` 排序；各窗口百分比优先取 `percentage` 字段 |
 | `kimi-coding-usage` | 用量% | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` —— 5h = `duration=300` 的窗口、周 = `duration=10080`（缺失时回退顶层 usage）；used = limit − remaining |
 | `volcengine-usage` | 用量% | 不走 `adaptRow`：`fetchRow` 内部以 AK/SK HMAC-SHA256 签名调用火山引擎 OpenAPI `GetAFPUsage` → `GetCodingPlanUsage`（回落），解析 `Result.AFPFiveHour/AFPWeekly/AFPMonthly`（Agent Plan，AFPDaily 跳过）或 `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}`（Coding Plan，仅百分比） |
+| `chatgpt-subscription` | 用量% | `{ plan_type, rate_limit: { primary_window: { used_percent, reset_at }, secondary_window? } }` —— 经 `~/.codex/auth.json` 的 OAuth 令牌读取 Codex 内部用量端点；primary 映射为周窗口，secondary（Pro）映射为 5h 窗口。实验性接口 |
 
 ### 代理（部分供应商无法直连时）
 
