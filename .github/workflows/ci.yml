@@ -88,18 +88,36 @@ jobs:
           npm init -y >/dev/null
           # --ignore-scripts: the checker's prepack would build TS from its
           # devDependencies; its lib/ is committed, so the pack installs as is.
-          # --registry=npmmirror: 2026-08-21 npmjs CDN split-brain — after the
-          # @deepseek-ai bulk republish, runners resolve STALE packuments
-          # (old dist.integrity) against NEW tarball bytes → EINTEGRITY on
-          # every @deepseek-ai/* 0.1.0-rc.8 dep (5 consecutive red runs). The
-          # mirror is verified self-consistent (tarball == declared sha512).
-          # REVERT to the default registry once npmjs packuments converge.
-          npm install --no-audit --no-fund --ignore-scripts \
+          #
+          # 2026-08-21 workaround for the @deepseek-ai bulk republish: npm's
+          # git-dep path consumes the checker's COMMITTED package-lock.json,
+          # whose integrity hashes are pinned to the PRE-republish tarballs →
+          # EINTEGRITY against today's bytes regardless of registry (6 red
+          # runs). Bypass the git-dep machinery: fetch the GitHub tarball,
+          # DROP the stale lockfile, and install its runtime deps in place
+          # (mirror registry, verified self-consistent). Revert to the plain
+          # `npm install github:omdsh-dev/dsh-plugin-check …` once the
+          # checker repo refreshes its lockfile.
+          # Peer companions the checker imports: installed at the env root
+          # FIRST — a later npm install here would prune the hand-placed
+          # checker as extraneous, so the checker goes in LAST.
+          (cd "$ENVDIR" && npm install --no-audit --no-fund \
+            --ignore-scripts \
             --registry=https://registry.npmmirror.com \
-            github:omdsh-dev/dsh-plugin-check \
             @deepseek-ai/dsh-tools \
             @deepseek-ai/dsh-invariants \
-            @deepseek-ai/cordis
+            @deepseek-ai/cordis)
+          CHECKER_DIR="$ENVDIR/node_modules/@deepseek-ai/dsh-plugin-check"
+          mkdir -p "$CHECKER_DIR"
+          curl -fsSL https://codeload.github.com/omdsh-dev/dsh-plugin-check/tar.gz/refs/heads/main \
+            | tar xz -C "$CHECKER_DIR" --strip-components=1
+          rm -f "$CHECKER_DIR/package-lock.json"
+          # Install the checker's runtime deps in place (its lib/ is
+          # committed; --ignore-scripts skips the TS-building prepack). This
+          # install runs inside CHECKER_DIR only — it cannot prune siblings.
+          (cd "$CHECKER_DIR" && npm install --no-audit --no-fund \
+            --ignore-scripts --omit=dev \
+            --registry=https://registry.npmmirror.com)
           cd "$GITHUB_WORKSPACE"
           PLUGIN_CHECK_DEPS="$ENVDIR" node scripts/plugin-check.mjs .
       - name: Pack distribution tarball
