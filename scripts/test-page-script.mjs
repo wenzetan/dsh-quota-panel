@@ -250,20 +250,29 @@ check('A: zhipu quota percentage fallback', (() => {
 // so the test harness can stub by URL substring without caring about headers.
 let veHandler;
 let veCalls = [];
+let veInits = [];
+// Volcengine responses are consumed via arrayBuffer() (size-capped before
+// parsing), so stubs provide that — not json().
+const veJson = (obj, ok = true, status = 200) => ({
+	ok,
+	status,
+	arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(obj)).buffer
+});
 globalThis.fetch = async (url, init) => {
 	veCalls.push(String(url));
+	veInits.push(init);
 	const s = String(url);
-	if (!s.includes('open.volcengineapi.com')) return { ok: false, status: 404, json: async () => ({}) };
+	if (!s.includes('open.volcengineapi.com')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
 	if (s.includes('Action=GetAFPUsage')) {
-		return { ok: true, status: 200, json: async () => ({ ResponseMetadata: { RequestId: 't' }, Result: {
+		return veJson({ ResponseMetadata: { RequestId: 't' }, Result: {
 			PlanType: 'medium',
 			AFPFiveHour: { Quota: 10000, Used: 6500, ResetTime: 1787167230000 },
 			AFPWeekly:   { Quota: 35000, Used: 7000, ResetTime: 1787500800000 },
 			AFPMonthly:  { Quota: 100000, Used: 6000, ResetTime: 1789833599000 },
 			AFPDaily:    { Quota: 50000, Used: 0, ResetTime: 1787241600000 }
-		} }) };
+		} });
 	}
-	return { ok: true, status: 200, json: async () => ({ ResponseMetadata: { RequestId: 't' }, Result: {} }) };
+	return veJson({ ResponseMetadata: { RequestId: 't' }, Result: {} });
 };
 try {
 	// AK-only -> row must NOT appear (needs both credentials)
@@ -281,6 +290,7 @@ try {
 
 	// fetch-all -> GetAFPUsage response normalizes to 5h/weekly/monthly; AFPDaily skipped
 	veCalls = [];
+	veInits = [];
 	const veFetch = await veHandler('fetch-all', null, undefined);
 	const veRow = veFetch.value.rows.find((r) => r.id === 'volcengine');
 	check('A: volcengine Agent Plan -> 3 windows (AFPDaily skipped)', (() => {
@@ -294,8 +304,12 @@ try {
 	})());
 	check('A: volcengine calls the signed OpenAPI with Action= and Region= in query', veCalls.some((u) => u.includes('Action=GetAFPUsage') && u.includes('Region=cn-beijing') && u.startsWith('https://open.volcengineapi.com/')));
 	check('A: volcengine request uses POST (not GET) with Authorization header', (() => {
-		// Re-fetch while capturing init to assert signing shape
-		return true; // covered below by header inspection
+		const i = veCalls.findIndex((u) => u.includes('Action=GetAFPUsage'));
+		const init = i >= 0 ? veInits[i] : null;
+		return init?.method === 'POST'
+			&& typeof init?.headers?.Authorization === 'string'
+			&& /^HMAC-SHA256 Credential=AKLTtest\/\d{8}\/cn-beijing\/ark\/request, SignedHeaders=host;x-date;x-content-sha256;content-type, Signature=[0-9a-f]{64}$/.test(init.headers.Authorization)
+			&& /^20\d{6}T\d{6}Z$/.test(String(init.headers['X-Date']));
 	})());
 } finally {
 	globalThis.fetch = realFetch;
@@ -306,22 +320,22 @@ let veCpCalls = [];
 globalThis.fetch = async (url) => {
 	veCpCalls.push(String(url));
 	const s = String(url);
-	if (!s.includes('open.volcengineapi.com')) return { ok: false, status: 404, json: async () => ({}) };
+	if (!s.includes('open.volcengineapi.com')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
 	if (s.includes('Action=GetAFPUsage')) {
 		// subscribed=false equivalent: empty Result (no quota fields)
-		return { ok: true, status: 200, json: async () => ({ ResponseMetadata: {}, Result: { PlanType: 'medium' } }) };
+		return veJson({ ResponseMetadata: {}, Result: { PlanType: 'medium' } });
 	}
 	if (s.includes('Action=GetCodingPlanUsage')) {
-		return { ok: true, status: 200, json: async () => ({ ResponseMetadata: {}, Result: {
+		return veJson({ ResponseMetadata: {}, Result: {
 			Status: 'Running',
 			QuotaUsage: [
 				{ Level: 'session', Percent: 0, ResetTimestamp: -1 },
 				{ Level: 'weekly', Percent: 1.67, ResetTimestamp: 1782057600 },
 				{ Level: 'monthly', Percent: 0.84, ResetTimestamp: 1784303999 }
 			]
-		} }) };
+		} });
 	}
-	return { ok: true, status: 200, json: async () => ({}) };
+	return veJson({ ResponseMetadata: {}, Result: {} });
 };
 try {
 	credentialMap = { VOLC_ACCESS_KEY: 'AKLTtest', VOLC_SECRET_KEY: 'secretkey' };
@@ -344,9 +358,9 @@ try {
 // Volcengine: AK/SK auth error surfaces as per-row error (not throw)
 globalThis.fetch = async (url) => {
 	if (String(url).includes('open.volcengineapi.com')) {
-		return { ok: true, status: 200, json: async () => ({ ResponseMetadata: { Error: { Code: 'SignatureDoesNotMatch', Message: 'bad secret' } } }) };
+		return veJson({ ResponseMetadata: { Error: { Code: 'SignatureDoesNotMatch', Message: 'bad secret' } } });
 	}
-	return { ok: false, status: 404, json: async () => ({}) };
+	return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
 };
 try {
 	credentialMap = { VOLC_ACCESS_KEY: 'AKLTbad', VOLC_SECRET_KEY: 'bad' };
@@ -356,6 +370,59 @@ try {
 	check('A: volcengine auth error surfaces as per-row error with upstream code', !!errRow?.error && /SignatureDoesNotMatch/.test(errRow.error) && errRow.view === undefined);
 } finally {
 	globalThis.fetch = realFetch;
+}
+
+// Volcengine: golden signing vector — freeze the clock, assert the exact
+// Authorization header the documented algorithm must produce for
+// ak=AKLTtest / sk=secretkey / cn-beijing / GetAFPUsage @ 2026-08-21T08:00:00Z.
+// The constant is precomputed independently of the source; any change to the
+// canonical-request shape, key derivation, or header order breaks it.
+{
+	const FIXED = 1787299200000; // 2026-08-21T08:00:00.000Z
+	let capturedAuth = null;
+	globalThis.fetch = async (url, init) => {
+		if (String(url).includes('open.volcengineapi.com')) {
+			capturedAuth = init?.headers?.Authorization ?? null;
+			return veJson({ ResponseMetadata: {}, Result: { AFPFiveHour: { Quota: 10, Used: 1 } } });
+		}
+		return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+	};
+	const RealDate = Date;
+	class FixedDate extends RealDate {
+		constructor(...args) { super(...(args.length ? args : [FIXED])); }
+		static now() { return FIXED; }
+	}
+	globalThis.Date = FixedDate;
+	try {
+		credentialMap = { VOLC_ACCESS_KEY: 'AKLTtest', VOLC_SECRET_KEY: 'secretkey' };
+		const gvHandler = mount({});
+		await gvHandler('fetch-all', null, undefined);
+		check('A: volcengine golden vector: exact signed Authorization header',
+			capturedAuth === 'HMAC-SHA256 Credential=AKLTtest/20260821/cn-beijing/ark/request, SignedHeaders=host;x-date;x-content-sha256;content-type, Signature=66328abd9f9ac565ed30d2d2f34da8b2d1e9c29e65bac32acaeca149892d3930'
+		);
+	} finally {
+		globalThis.Date = RealDate;
+		globalThis.fetch = realFetch;
+	}
+}
+
+// Volcengine: response bodies above the 1 MiB ceiling are refused
+{
+	globalThis.fetch = async (url) => {
+		if (String(url).includes('open.volcengineapi.com')) {
+			return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array(1024 * 1024 + 1).buffer };
+		}
+		return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+	};
+	try {
+		credentialMap = { VOLC_ACCESS_KEY: 'AKLTtest', VOLC_SECRET_KEY: 'secretkey' };
+		const bigHandler = mount({});
+		const bigFetch = await bigHandler('fetch-all', null, undefined);
+		const bigRow = bigFetch.value.rows.find((r) => r.id === 'volcengine');
+		check('A: volcengine oversized body (>1 MiB) refused with per-row error', !!bigRow?.error && /exceeds/.test(bigRow.error) && bigRow.view === undefined);
+	} finally {
+		globalThis.fetch = realFetch;
+	}
 }
 
 // Volcengine: signed headers shape (algorithm/scope/order strings present in compiled bundle)
