@@ -595,6 +595,20 @@ PLUGIN_CHECK_DEPS=/tmp/pc-deps node scripts/plugin-check.mjs .
 # 第一行的 cosmokit 导入为 "./cosmokit.js"，然后重新构建。
 ```
 
+## 参与贡献
+
+**欢迎提交 PR！** 🎉 无论是新增供应商适配器（目录 + 自动发现管线让加一个供应商基本是声明式的——[火山方舟 PR][pr4] 是一份完整的参考实现，还包含首个 AK/SK 签名供应商）、修 bug、调 UI，还是改进文档，都欢迎。
+
+提 PR 前请：
+
+1. 按[本地开发](#本地开发)构建并跑双面检查（`npm run build && npm test`）——CI 会拒绝过期的 `lib/`，改完 `src/` 记得重新构建并提交产物；
+2. 在 `scripts/test-page-script.mjs` 为新行为补充断言（mock 上游 + 归一化后的行视图）；
+3. 涉及用户可见变化时，同步更新 `README.md` 与 `README.zh.md`。
+
+没有 OpenAPI 端点的供应商（仅 Cookie / CLI 的套餐），请先开 issue 讨论可行性。
+
+[pr4]: https://github.com/wenzetan/dsh-quota-panel/pull/4
+
 ## License
 
 MIT

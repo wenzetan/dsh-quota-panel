@@ -723,6 +723,29 @@ PLUGIN_CHECK_DEPS=/tmp/pc-deps node scripts/plugin-check.mjs .
 # schemastery.mjs to "./cosmokit.js", then rebuild.
 ```
 
+## Contributing
+
+**Pull requests are welcome!** 🎉 Whether it is a new provider adapter
+(the catalog + auto-discovery pipeline makes adding one mostly declarative
+— see the [Volcengine Ark PR][pr4] for a complete reference
+implementation, including the first AK/SK-signed provider), a bug fix, a
+UI tweak, or docs improvements.
+
+Before opening a PR:
+
+1. Follow [Local development](#local-development) to build and run the
+   dual-face checks (`npm run build && npm test`) — CI rejects a stale
+   `lib/`, so rebuild and commit the artifacts after editing `src/`;
+2. Add test assertions in `scripts/test-page-script.mjs` covering the new
+   behavior (mocked upstream + normalized row view);
+3. Update both `README.md` and `README.zh.md` if the change is
+   user-facing.
+
+For provider requests without an OpenAPI endpoint (Cookie / CLI-only
+plans), open an issue first so we can discuss feasibility.
+
+[pr4]: https://github.com/wenzetan/dsh-quota-panel/pull/4
+
 ## License
 
 MIT
