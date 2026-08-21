@@ -552,6 +552,7 @@ check('B: handoff id matches package name', handoffs[0]?.id === 'dsh-quota-panel
 const reactStub = {
 	useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
 	useEffect: () => {},
+	useRef: (init) => ({ current: init }),
 	createElement: (type, props, ...children) => ({ type, props, children })
 };
 const clientExports = handoffs[0].factory((spec) => {
@@ -594,7 +595,7 @@ check('B: renderer returns element', element && typeof element.type === 'functio
 {
 	const patched = clientSource.replace(
 		'exports.apply = apply;',
-		'exports.__rowView = rowView;\nexports.apply = apply;'
+		'exports.__rowView = rowView;\nexports.__clampPos = clampPos;\nexports.apply = apply;'
 	);
 	const handoffs2 = [];
 	const sandbox2 = {
@@ -654,8 +655,40 @@ check('B: renderer returns element', element && typeof element.type === 'functio
 	// Layout fixes from issue #1: the capsule must clear the bottom status
 	// row, and the shell overlay layer must not sit UNDER body-mounted
 	// third-party fixed panels (z-index 1000+).
-	check('B: capsule clears the bottom status row (bottom >= 60px)', /#dsh-quota-panel\{[^}]*bottom:([0-9]+)px/.test(clientSource) && Number(clientSource.match(/#dsh-quota-panel\{[^}]*bottom:([0-9]+)px/)[1]) >= 60);
+	// Layout from issue #1, reworked per maintainer feedback: the default
+	// position stays 18px (60px looked bad) and the panel is DRAGGABLE
+	// instead; the overlay lift stays.
+	check('B: capsule default bottom stays 18px (drag replaces the offset)', /#dsh-quota-panel\{[^}]*bottom:18px/.test(clientSource));
 	check('B: overlay layer lift rule injected (z-index 1150 over body panels)', clientSource.includes('[class*="overlayLayer"]{z-index:1150 !important;}'));
+	// Drag: pointer capture + move threshold (click-to-expand intact),
+	// position clamped into the viewport and persisted with the other
+	// settings; reset clears it.
+	check('B: drag uses pointer capture with move+up handlers', clientSource.includes('setPointerCapture') && clientSource.includes('onPointerDown') && clientSource.includes('onPointerMove') && clientSource.includes('onPointerUp'));
+	check('B: drag threshold suppresses the expand click', clientSource.includes('DRAG_THRESHOLD') && clientSource.includes('suppressClick'));
+	check('B: drag position persisted + reset clears it', clientSource.includes('position: null') && (clientSource.split('position: null').length - 1) >= 2);
+	check('B: drag touch-action none (capsule + header handles)', clientSource.includes('touch-action:none') && clientSource.includes('cursor:grab'));
+	check('B: clampPos keeps the corner reachable on every edge', (() => {
+		const f = factoryExports.__clampPos;
+		if (typeof f !== 'function') return false;
+		const a = f(-50, -50, 1000, 800);
+		const b = f(5000, 5000, 1000, 800);
+		const c = f(100, 100, 1000, 800);
+		return a.x === 8 && a.y === 8 && b.x === 992 && b.y === 792 && c.x === 100 && c.y === 100;
+	})());
+	// Anchor semantics: the stored point is the capsule's BOTTOM-RIGHT corner.
+	// All three sizes (capsule / card / card+settings) grow toward the top-
+	// left from that shared corner, so expanding never shifts the anchor.
+	check('B: dragged panel anchors its bottom-right corner (right/bottom px, no left/top)', (() => {
+		const m = clientSource.match(/panelStyle = ([^;]+);/);
+		return !!m && /right:/.test(m[1]) && /bottom:/.test(m[1]) && !/left:/.test(m[1]) && !/top:/.test(m[1]);
+	})());
+	check('B: clampPos clamps the bottom-right corner (max = vw-8 / vh-8)', (() => {
+		const f = factoryExports.__clampPos;
+		const b = f(5000, 5000, 1000, 800);
+		const c = f(1000 - 8, 800 - 8, 1000, 800);
+		return b.x === 992 && b.y === 792 && c.x === 992 && c.y === 792;
+	})());
+	check('B: drag stores the pointer-grab offset from the bottom-right corner', clientSource.includes('baseRight') && clientSource.includes('baseBottom') && clientSource.includes('anchorRight') && clientSource.includes('anchorBottom'));
 }
 
 // Surface checks on the bundle source (gear entry, aria, persistence, overlay opt-in).
