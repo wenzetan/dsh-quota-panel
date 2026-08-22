@@ -10,7 +10,7 @@
 // shell.overlay slot registration, and the settings-panel surface.
 import vm from 'node:vm';
 import http from 'node:http';
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -544,6 +544,54 @@ plugin.apply(noCtx, {});
 const noSpecs = await noRegs[0].h('specs', null, undefined);
 check('A: chatgpt hidden when auth.json does not exist', !noSpecs.value.rows.some((r) => r.id === 'chatgpt'));
 process.env.CODEX_HOME = prevCodexHome;
+
+// DSH-managed device-login token store: when $DSH_HOME/dsh-quota-panel/chatgpt-auth.json
+// exists but no Codex auth.json does, the row should still appear and the auth-status
+// RPC should report source='dsh'.
+{
+	const prevDsh = process.env.DSH_HOME;
+	const dshHome = mkdtempSync(join(tmpdir(), 'dsh-qp-dshhome-'));
+	process.env.DSH_HOME = dshHome;
+	const storeDir = join(dshHome, 'dsh-quota-panel');
+	mkdirSync(storeDir, { recursive: true });
+	const exp = Date.now() + 3600_000;
+	writeFileSync(join(storeDir, 'chatgpt-auth.json'), JSON.stringify({
+		source: 'dsh', account_id: 'acct-dsh-1', plan_type: 'pro',
+		tokens: { access_token: 'eyJ.dsh-access', refresh_token: 'rt-dsh', id_token: 'x', expires_at_ms: exp }
+	}));
+	const regs = [];
+	const ctx2 = { connection: { rpc: { handle: (ch, h) => { regs.push({ ch, h }); return async () => {}; } } }, credentials: { resolve: async () => undefined } };
+	plugin.apply(ctx2, {});
+	const h2 = regs[0].h;
+	const s2 = await h2('specs', null, undefined);
+	check('A: chatgpt discovered via DSH store without Codex auth.json', s2.value.rows.some((r) => r.id === 'chatgpt'));
+	const st = await h2('chatgpt-auth-status', null, undefined);
+	check('A: chatgpt-auth-status reports source=dsh + plan', st.ok && st.value.source === 'dsh' && st.value.loggedIn === true && st.value.plan_type === 'pro');
+	// logout removes the DSH store and flips status
+	await h2('chatgpt-logout', null, undefined);
+	const st2 = await h2('chatgpt-auth-status', null, undefined);
+	check('A: chatgpt-logout clears DSH store', st2.ok && st2.value.loggedIn === false && st2.value.source === null);
+	process.env.DSH_HOME = prevDsh;
+}
+// chatgpt-login-start: when there is no Codex auth and no DSH store, the host
+// should return a one-time code + verification URL (network permitting). We do
+// not hit the real network in CI; just assert the RPC surface exists and
+// cancelling leaves no in-flight state.
+{
+	const prevDsh = process.env.DSH_HOME;
+	const prevCodex = process.env.CODEX_HOME;
+	process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-empty-dsh-'));
+	process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-empty-codex-'));
+	const regs = [];
+	const ctx3 = { connection: { rpc: { handle: (ch, h) => { regs.push({ ch, h }); return async () => {}; } } }, credentials: { resolve: async () => undefined } };
+	plugin.apply(ctx3, {});
+	const h3 = regs[0].h;
+	// cancel is safe even with nothing in flight
+	const c = await h3('chatgpt-login-cancel', null, undefined);
+	check('A: chatgpt-login-cancel is safe with no in-flight login', c.ok === true && c.value.cancelled === true);
+	process.env.DSH_HOME = prevDsh;
+	process.env.CODEX_HOME = prevCodex;
+}
 
 // ---------- A2d: search lane unknown / absent weekly (no fabricated 0%) ----------
 credentialMap = { ZAI_CODING_CN_API_KEY: 'sk-zai-cn', ZAI_API_KEY: 'sk-zai', KIMI_API_KEY: 'sk-kimi', MINIMAX_CN_API_KEY: 'sk-mmcn', ZHIPU_API_KEY: 'sk-zp' };

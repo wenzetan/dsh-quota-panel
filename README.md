@@ -312,7 +312,7 @@ After restart, check the panel:
 > Redact it before pasting into chats, tickets, or screenshots, and rotate it
 > from the [key management page](https://console.volcengine.com/iam/keymanage)
 > when no longer needed.
-| ChatGPT subscription (Plus/Pro) | `~/.codex/auth.json` (Codex login; no API key) | `chatgpt.com/backend-api/wham/usage` | weekly usage % (Pro includes a 5h window) |
+| ChatGPT subscription (Plus/Pro) | in-plugin login or `~/.codex/auth.json` (no API key) | `chatgpt.com/backend-api/wham/usage` | weekly usage % (Pro includes a 5h window) |
 
 An additional **`openai-billing`** format adapts one-api / new-api style
 aggregators: set `endpoint` to the aggregator base URL and the host half
@@ -350,35 +350,45 @@ field (e.g. `"US$"`).
 ### ChatGPT subscription (Plus/Pro)
 
 ChatGPT subscription usage is **not** API billing — there is no public
-balance/usage API. This plugin reads the ChatGPT OAuth token from
-`~/.codex/auth.json` (written when you log in via the open-source Codex CLI),
-calls the same internal usage endpoint Codex uses, and shows the **weekly
-window** (and the **5-hour window** on Pro) as a used-percentage row.
+balance/usage API. This plugin calls the same internal usage endpoint Codex
+uses, with a ChatGPT OAuth token, and shows the **weekly window** (and the
+**5-hour window** on Pro) as a used-percentage row. **Two login methods are
+supported**, pick whichever you prefer:
 
 > ⚠️ **Experimental.** The endpoint (`chatgpt.com/backend-api/wham/usage`) is
 > an undocumented internal API used by the Codex CLI; its response shape may
-> change. The plugin only performs read-only queries and never modifies your
-> Codex configuration.
+> change. The plugin only performs read-only queries.
 
-**Setup:**
+#### Option A: in-plugin login (recommended — no Codex CLI install required)
 
-1. Install and log in to the Codex CLI any way you like
-   (`npm i -g @openai/codex`, then run `codex` and complete the ChatGPT login
-   in your browser). This creates `~/.codex/auth.json`;
-2. No key in `.credentials.yaml` is needed — the plugin auto-detects
-   `auth.json` and shows the ChatGPT row whenever it exists;
-3. Restart `dsh web`. A "ChatGPT" row appears; hover to see `plan: plus/pro`
-   and `weekly: N%` (Pro also shows a 5h window).
+1. Restart `dsh web` and open the panel **settings** (gear icon) in the
+   bottom-right corner;
+2. In the "ChatGPT account" section at the top, click **"Log in to ChatGPT"**;
+3. The plugin starts an OAuth device-code flow and displays a **one-time code**
+   plus the sign-in URL `https://auth.openai.com/codex/device`;
+4. Open the URL in your browser, sign in with your ChatGPT Plus/Pro account,
+   and enter the code;
+5. Once authorized, a "ChatGPT" row appears automatically (no restart). Hover
+   to see `plan: plus/pro` and `weekly: N%` (Pro also shows a 5h window).
 
-How it works: when the access token expires, the plugin refreshes it via
-`auth.openai.com/oauth/token` using the refresh token in `auth.json`. Refreshed
-tokens stay in the plugin process memory only and are **never written back** to
-`auth.json` (that file is owned by the Codex CLI). If refresh fails (e.g. you
-logged in elsewhere and invalidated the token), the row shows an error — just
-run `codex` to log in again and it recovers.
+Tokens are stored in `$DSH_HOME/dsh-quota-panel/chatgpt-auth.json`
+(`C:\Users\<you>\.dsh\dsh-quota-panel\` on Windows, file mode 0600). When the
+access token expires the plugin refreshes it with the refresh token and writes
+it back. Click "Log out" in the same section to delete the local token.
 
-If the `CODEX_HOME` environment variable points at a custom directory, the
-plugin reads from `$CODEX_HOME/auth.json`.
+#### Option B: reuse a Codex CLI login
+
+If you have already logged in via the [Codex CLI](https://developers.openai.com/codex/)
+(ran `codex` and completed the browser sign-in), the plugin automatically reads
+`~/.codex/auth.json` (or `$CODEX_HOME/auth.json`) — **no extra configuration
+needed**. With this method, refreshed tokens stay in the plugin process memory
+only and are **never written back** to `auth.json` (that file is owned by the
+Codex CLI).
+
+When both are present, the **in-plugin login takes precedence**. When neither
+exists the ChatGPT row is hidden. If the token is invalidated by a login
+elsewhere, the row shows an error — run Option A again, or `codex login`, to
+recover.
 
 ### Built-in formats
 

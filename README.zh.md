@@ -248,7 +248,7 @@ VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - 显示 `No active Agent Plan or Coding Plan subscription` → 签名通过但该账号没有订阅 Agent/Coding Plan（按量付费账号就会这样，面板上可以在 ⚙ 设置里隐藏这一行）。
 
 > 安全建议：AK/SK 一旦泄露他人可以读你方舟账号的所有用量数据，贴到聊天/工单/截图前先打码；不再用时去 [密钥管理页](https://console.volcengine.com/iam/keymanage) 禁用并轮换。
-| ChatGPT 订阅（Plus/Pro） | `~/.codex/auth.json`（Codex 登录，无需 API Key） | `chatgpt.com/backend-api/wham/usage` | 周用量%（Pro 含 5h 窗口） |
+| ChatGPT 订阅（Plus/Pro） | 插件内登录 或 `~/.codex/auth.json`（无需 API Key） | `chatgpt.com/backend-api/wham/usage` | 周用量%（Pro 含 5h 窗口） |
 
 另内置 **`openai-billing`** 格式，适配 one-api / new-api 等聚合站：`endpoint` 配
 聚合站 base URL，宿主侧请求 `{base}/v1/dashboard/billing/subscription`
@@ -282,31 +282,37 @@ VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ### ChatGPT 订阅（Plus/Pro）接入
 
 ChatGPT 订阅用量**不是 API 计费**，没有公开的余额/用量 API。本插件通过
-官方开源 Codex CLI 登录后写入的 `~/.codex/auth.json`，读取 ChatGPT OAuth
-令牌，调用 Codex 同款的内部用量端点，把 Plus/Pro 套餐的**周窗口（及 Pro
-的 5 小时窗口）已用百分比**显示在面板上。
+ChatGPT OAuth 令牌调用 Codex 同款的内部用量端点，把 Plus/Pro 套餐的**周窗口
+（及 Pro 的 5 小时窗口）已用百分比**显示在面板上。支持**两种登录方式**，
+任选其一：
 
 > ⚠️ **实验性（experimental）**：该端点（`chatgpt.com/backend-api/wham/usage`）
 > 是 Codex CLI 内部使用的未公开接口，响应字段可能随官方调整而变化。本插件
-> 只做只读查询，不会写入或修改你的 Codex 配置。
+> 只做只读查询。
 
-**接入步骤：**
+#### 方式 A：插件内登录（推荐，无需安装 Codex CLI）
 
-1. 安装并登录 Codex CLI（任意方式：`npm i -g @openai/codex` 后运行 `codex`，
-   在浏览器完成 ChatGPT 登录）。登录会生成 `~/.codex/auth.json`；
-2. 无需在 `.credentials.yaml` 里配置任何 Key——插件自动探测 `auth.json`，
-   存在就显示 ChatGPT 行；
-3. 重启 `dsh web`。面板出现「ChatGPT」行，悬停可见 `plan: plus/pro` 与
-   `weekly: N%`（Pro 还会有 5h 窗口）。
+1. 重启 `dsh web`，打开右下角面板的**设置**（齿轮图标）；
+2. 在最上方「ChatGPT 账号」一栏点「**登录 ChatGPT**」；
+3. 插件会调起设备码（device-code）流程，设置里显示一个**一次性验证码**和
+   登录链接 `https://auth.openai.com/codex/device`；
+4. 在浏览器打开链接、登录你的 ChatGPT Plus/Pro 账号并输入验证码；
+5. 授权完成后面板自动出现「ChatGPT」行（无需重启），悬停可见
+   `plan: plus/pro` 与 `weekly: N%`（Pro 还会有 5h 窗口）。
 
-工作机制：access token 过期时，插件用 `auth.json` 里的 refresh token 向
-`auth.openai.com/oauth/token` 自动刷新；刷新后的令牌仅保存在插件进程内存中，
-**不会回写** `auth.json`（该文件归 Codex CLI 所有）。若 refresh 也失败
-（例如在别处重新登录导致令牌失效），面板会显示错误，重新运行一次 `codex`
-登录即可恢复。
+令牌保存在 `$DSH_HOME/dsh-quota-panel/chatgpt-auth.json`（Windows 即
+`C:\Users\<你>\.dsh\dsh-quota-panel\`，文件权限 0600），access token 过期时
+插件用 refresh token 自动刷新并回写。点同一栏的「退出登录」即可删除本地令牌。
 
-如果 `CODEX_HOME` 环境变量指向了自定义目录，插件会从
-`$CODEX_HOME/auth.json` 读取。
+#### 方式 B：复用 Codex CLI 登录
+
+如果你已经用 [Codex CLI](https://developers.openai.com/codex/) 登录过（运行
+`codex` 完成浏览器授权），插件会自动读取 `~/.codex/auth.json`（或
+`$CODEX_HOME/auth.json`），**无需任何额外配置**。此方式下刷新后的令牌只留在
+插件进程内存，**不会回写** `auth.json`（该文件归 Codex CLI 所有）。
+
+两种方式同时存在时，**插件内登录的令牌优先**；都没有时 ChatGPT 行不显示。
+若令牌在别处被重新登录而失效，面板会提示，重新走一次方式 A 或 `codex` 登录即可恢复。
 
 ### 内置 format
 
