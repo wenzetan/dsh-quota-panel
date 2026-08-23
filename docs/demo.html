@@ -349,10 +349,18 @@ window.fetch = function (url) {
     var labels = spec.windowLabels || { rolling: '滚', weekly: '周', monthly: '月' };
     var fmtWin = function (label, v) { return label + ' ' + (v === null ? '—' : v + '%'); };
 
-    // weekly absent -> dropped; search lane unknown -> -%
-    var textSegs = [fmtWin(labels.rolling, rp)];
-    if (wp !== null) textSegs.push(fmtWin(labels.weekly, wp));
-    textSegs.push(labels.monthly + ' ' + (mp === null ? '-%' : mp + '%'));
+    // weekly-only plans (ChatGPT Plus / Codex) drop empty 滚/月 noise and
+    // surface the weekly reset time inline.
+    var weeklyOnly = rp === null && wp !== null && mp === null;
+    var textSegs;
+    if (weeklyOnly) {
+      textSegs = [fmtWin(labels.weekly, wp)];
+      if (u.weekly && u.weekly.resetsAt) textSegs.push('下次重置 ' + fmtReset(u.weekly.resetsAt));
+    } else {
+      textSegs = [fmtWin(labels.rolling, rp)];
+      if (wp !== null) textSegs.push(fmtWin(labels.weekly, wp));
+      textSegs.push(labels.monthly + ' ' + (mp === null ? '-%' : mp + '%'));
+    }
     view.usage.textContent = textSegs.join(' · ');
     view.progress.style.width = Math.min(Math.max(high, 0), 100) + '%';
     view.caption.textContent = '当前已使用 ' + high + '%';
