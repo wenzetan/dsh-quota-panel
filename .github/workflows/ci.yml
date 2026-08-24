@@ -372,6 +372,11 @@ jobs:
     permissions:
       actions: write  # gh run list + gh workflow run (verify CI, dispatch release)
       contents: write
+      # The stable twin tags the validated rc commit, which may predate
+      # later workflow fixes on main; pushing a ref whose workflow files
+      # differ from the default branch needs this permission for
+      # GITHUB_TOKEN (GitHub App) pushes.
+      workflows: write
     steps:
       - uses: actions/checkout@v4
         with:
