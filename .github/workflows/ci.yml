@@ -356,14 +356,19 @@ jobs:
         run: gh workflow run ci.yml --ref "$TAG"
 
   # Manual promotion: the human confirmation step for stable versions.
-  # Dispatch with `rc_tag` set (e.g. v0.9.0-rc.3) — this job verifies that
-  # tag's CI run was green on exactly that commit, then creates a
-  # VERSION-ONLY bump commit on top of it (package.json X.Y.Z, replacing the
-  # rc suffix — npm refuses to publish a prerelease version to latest, and a
-  # stable release must ship the plain version anyway), tags it as the
-  # stable twin v0.9.0, and dispatches the release run. The bump keeps the
-  # stable tag's tree identical to the validated rc except for the version
-  # string, so check+boot on the tag re-verifies exactly the shipped bits.
+  # Dispatch with `rc_tag` set (e.g. v0.9.0-rc.3) — promotes that rc:
+  #   1. peel the (annotated) rc tag to its commit and require that tag's
+  #      own CI run (the one the tag job dispatched) to be green;
+  #   2. require the rc commit to be an ancestor of main and main to differ
+  #      from it ONLY under .github/ (otherwise cut a fresh rc first —
+  #      stable must not ship code that never went through an rc);
+  #   3. push a VERSION-ONLY bump commit on top of main (npm refuses to
+  #      publish a prerelease version to latest, and a stable release must
+  #      ship the plain version) and tag it v0.9.0.
+  # The bump rides on main rather than a detached twin because GITHUB_TOKEN
+  # (a GitHub App) can never push a ref whose workflow files differ from
+  # the default branch — the `workflows` scope does not exist for
+  # GITHUB_TOKEN — and an rc commit usually predates later workflow fixes.
   # If the `production` environment has a required reviewer, release-stable
   # waits there for a second, explicit approval.
   promote:
@@ -372,11 +377,6 @@ jobs:
     permissions:
       actions: write  # gh run list + gh workflow run (verify CI, dispatch release)
       contents: write
-      # The stable twin tags the validated rc commit, which may predate
-      # later workflow fixes on main; pushing a ref whose workflow files
-      # differ from the default branch needs this permission for
-      # GITHUB_TOKEN (GitHub App) pushes.
-      workflows: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -396,8 +396,8 @@ jobs:
           STABLE_VER="${STABLE#v}"
           # Annotated tags (all tags this workflow's tag job creates via
           # `git tag -a`) make git/ref/tags/X return the TAG OBJECT sha,
-          # not the commit; peel it so the CI lookup and the stable twin
-          # both target the actual commit the rc tested.
+          # not the commit; peel it so the CI lookup targets the commit
+          # the rc actually tested.
           TAGOBJ="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RC}" --jq '.object.sha')"
           TAGTYPE="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RC}" --jq '.object.type')"
           if [ "$TAGTYPE" = "tag" ]; then
@@ -409,9 +409,8 @@ jobs:
           # Look up CI on the rc TAG's own run (--branch "$RC": the tag job
           # dispatches one right after creating each rc tag, so its
           # head_branch is the tag name). Filtering by commit alone would
-          # match THIS promote run itself — dispatched on main, whose head
-          # is the rc commit — and read its own in-flight conclusion: a
-          # self-shadowing deadlock that could never pass.
+          # match THIS promote run itself — dispatched on main — and read
+          # its own in-flight conclusion: a deadlock that could never pass.
           CONCLUSION="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow CI --branch "$RC" --limit 1 --json conclusion --jq '.[0].conclusion // "none"')"
           if [ "$CONCLUSION" != "success" ]; then
             echo "::error::CI for $RC is '$CONCLUSION' (need success) — fix or re-tag before promoting"
@@ -421,24 +420,40 @@ jobs:
             echo "::error::$STABLE already exists — bump the version instead"
             exit 1
           fi
+          git fetch origin main
+          MAIN_SHA="$(git rev-parse origin/main)"
+          if ! git merge-base --is-ancestor "$SHA" "$MAIN_SHA"; then
+            echo "::error::$RC's commit is not on main (rebased away?) — re-cut the rc"
+            exit 1
+          fi
+          # Stable must ship rc-validated code: main may only differ from the
+          # rc under .github/ (workflow fixes); anything else needs a fresh rc.
+          NON_CI_CHANGES="$(git diff --name-only "$SHA" "$MAIN_SHA" -- . ':!.github')"
+          if [ -n "$NON_CI_CHANGES" ]; then
+            echo "::error::main has changes beyond $RC outside .github/:"$'\n'"$NON_CI_CHANGES"$'\n'"Cut a new rc that includes them before promoting."
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Version-only bump commit on top of the validated rc commit. The
-          # surgical replace keeps the diff to the single version line
-          # (re-serializing the whole file would churn formatting).
-          git checkout --detach "$SHA"
+          git checkout -B promote "$MAIN_SHA"
+          # Version-only bump on top of main. The surgical replace keeps the
+          # diff to the single version line (re-serializing would churn it).
           if ! grep -q "\"version\": \"$STABLE_VER\"" package.json; then
             if ! sed -i "s/\"version\": \"[0-9][^\"]*\"/\"version\": \"$STABLE_VER\"/" package.json; then
               echo "::error::failed to set version $STABLE_VER in package.json"
               exit 1
             fi
           fi
-          if ! git diff --quiet -- package.json; then
-            git add package.json
-            git commit -m "$STABLE: promote $RC to stable (version-only)"
+          if git diff --quiet -- package.json; then
+            echo "::error::package.json on main already reads $STABLE_VER but $STABLE is absent — investigate manually"
+            exit 1
           fi
+          git add package.json
+          git commit -m "$STABLE: promote $RC to stable (version-only)"
+          # Non-FF failures here mean main moved concurrently — retry the dispatch.
+          git push origin HEAD:main
           STABLE_SHA="$(git rev-parse HEAD)"
-          git tag -a "$STABLE" -m "Release $STABLE (stable twin of $RC; version-only bump)" "$STABLE_SHA"
+          git tag -a "$STABLE" -m "Release $STABLE (promotes $RC; version-only bump on main)" "$STABLE_SHA"
           git push origin "$STABLE"
           echo "stable_tag=$STABLE" >> "$GITHUB_OUTPUT"
       - name: Trigger the release run on the stable tag
