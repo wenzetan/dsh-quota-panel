@@ -106,7 +106,10 @@
 				chatgptCopy: "复制",
 				chatgptCopied: "已复制",
 				chatgptOpenLink: "打开链接",
-				chatgptCancel: "取消"
+				chatgptCancel: "取消",
+				chatgptProxy: "ChatGPT 代理（可选）",
+				chatgptProxyHint: "登录与用量查询均经此 http(s) 代理（地区受限网络需要）；留空直连",
+				chatgptProxyDirect: "http://127.0.0.1:7890（留空直连）"
 			},
 			en: {
 				title: "Model quota",
@@ -170,7 +173,10 @@
 				chatgptCopy: "Copy",
 				chatgptCopied: "Copied",
 				chatgptOpenLink: "Open link",
-				chatgptCancel: "Cancel"
+				chatgptCancel: "Cancel",
+				chatgptProxy: "ChatGPT proxy (optional)",
+				chatgptProxyHint: "Login and usage queries go through this http(s) proxy (needed on region-restricted networks); empty = direct",
+				chatgptProxyDirect: "http://127.0.0.1:7890 (empty = direct)"
 			}
 		};
 
@@ -493,6 +499,8 @@
 		function ChatGPTAccount(props) {
 			var t = props.t;
 			var call = props.call;
+			var settings = props.settings;
+			var onChange = props.onChange;
 			var statusState = React.useState(null);
 			var status = statusState[0], setStatus = statusState[1];
 			var busyState = React.useState(false);
@@ -502,6 +510,19 @@
 			var copiedState = React.useState(false);
 			var copied = copiedState[0], setCopied = copiedState[1];
 			var pollRef = React.useRef(null);
+
+			// Proxy for the ChatGPT login flow AND its usage queries: stored
+			// under settings.proxy.chatgpt — the same key fetch-all already
+			// forwards as the per-row proxy override, so login and querying
+			// share one configuration.
+			var cgProxy = settings && settings.proxy && typeof settings.proxy.chatgpt === "string" ? settings.proxy.chatgpt : "";
+			function setProxy(value) {
+				var trimmed = String(value).trim();
+				var proxy = Object.assign({}, settings && settings.proxy);
+				if (trimmed === "") delete proxy.chatgpt;
+				else proxy.chatgpt = trimmed;
+				onChange(Object.assign({}, settings, { proxy: proxy }));
+			}
 
 			function sourceLabel(src) {
 				return src === "codex" ? t("chatgptSourceCodex") : t("chatgptSourceDsh");
@@ -536,7 +557,7 @@
 			function startLogin() {
 				setError(null);
 				setBusy(true);
-				call("chatgpt-login-start", null).then(function (r) {
+				call("chatgpt-login-start", { proxy: cgProxy || null }).then(function (r) {
 					if (!r || !r.ok) {
 						setBusy(false);
 						setError((r && r.error && r.error.message) || "failed");
@@ -601,7 +622,17 @@
 			return React.createElement("div", { className: "dsh-setting-section" },
 				React.createElement("div", { className: "dsh-setting-title" }, t("chatgptAccount")),
 				React.createElement("div", { className: "dsh-setting-row dsh-chatgpt-row", style: { flexDirection: "column", alignItems: "stretch", gap: "6px" } },
-					children));
+					children),
+				React.createElement("div", { className: "dsh-setting-row", style: { marginTop: "4px" } },
+					React.createElement("label", { className: "dsh-setting-label" }, t("chatgptProxy")),
+					React.createElement("input", {
+						className: "dsh-setting-input dsh-setting-proxy",
+						type: "text",
+						value: cgProxy,
+						placeholder: t("chatgptProxyDirect"),
+						onChange: function (e) { setProxy(e.target.value); }
+					})),
+				React.createElement("div", { className: "dsh-setting-hint" }, t("chatgptProxyHint")));
 		}
 
 		function SettingsPanel(props) {
@@ -695,7 +726,7 @@
 			});
 
 			return React.createElement("div", { className: "dsh-quota-settings" },
-				React.createElement(ChatGPTAccount, { key: "chatgpt", t: t, call: call }),
+				React.createElement(ChatGPTAccount, { key: "chatgpt", t: t, call: call, settings: settings, onChange: onChange }),
 				React.createElement("div", { className: "dsh-setting-section" },
 					React.createElement("div", { className: "dsh-setting-title" }, t("settingsProviders")),
 					visibilityRows.length ? visibilityRows : React.createElement("div", { className: "dsh-setting-hint" }, t("settingsNoProviders"))),

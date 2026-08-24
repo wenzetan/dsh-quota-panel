@@ -412,25 +412,43 @@ async function volcengineCall(action: string, region: string, ak: string, sk: st
 }
 
 /**
+ * Extract a human-readable error string from an OAuth/API error body.
+ * OpenAI's auth endpoints return a NESTED error object
+ * ({error:{code,message,type}}) while the token endpoints use flat
+ * OAuth2 fields (error/error_description) — handle both, never render a
+ * raw object (which stringifies to "[object Object]").
+ */
+function chatgptErrorText(json: any, fallback: string): string {
+	if (typeof json?.error_description === 'string' && json.error_description) return json.error_description;
+	const err = json?.error;
+	if (typeof err === 'string' && err) return err;
+	if (err && typeof err === 'object') {
+		const msg = typeof err.message === 'string' && err.message ? err.message : '';
+		const code = typeof err.code === 'string' && err.code ? err.code : '';
+		if (msg && code) return `${msg} (${code})`;
+		if (msg) return msg;
+		if (code) return code;
+	}
+	if (typeof json?.detail === 'string' && json.detail) return json.detail;
+	return fallback;
+}
+
+/**
  * Exchange a refresh_token for a fresh access token at the OpenAI OAuth
  * endpoint. Form-urlencoded as required by the OAuth2 token endpoint.
  */
-async function refreshChatGPTToken(refreshToken: string, timeoutMs: number): Promise<ChatGPTTokenBundle> {
+async function refreshChatGPTToken(refreshToken: string, timeoutMs: number, proxyUrl?: string): Promise<ChatGPTTokenBundle> {
 	const body = new URLSearchParams({
 		grant_type: 'refresh_token',
 		refresh_token: refreshToken,
 		client_id: CHATGPT_CLIENT_ID
 	}).toString();
-	const res = await fetch(CHATGPT_TOKEN_URL, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-		body,
-		signal: AbortSignal.timeout(timeoutMs)
-	});
+	const res = await getJson(CHATGPT_TOKEN_URL, {
+		'Content-Type': 'application/x-www-form-urlencoded'
+	}, proxyUrl, timeoutMs, 'POST', body);
 	const json: any = await res.json().catch(() => null);
 	if (!res.ok || json === null) {
-		const msg = json?.error_description || json?.error || `HTTP ${res.status}`;
-		throw new Error(`ChatGPT token refresh failed: ${msg}`);
+		throw new Error(`ChatGPT token refresh failed: ${chatgptErrorText(json, `HTTP ${res.status}`)}`);
 	}
 	if (typeof json.access_token !== 'string' || json.access_token.length === 0) {
 		throw new Error('ChatGPT token refresh response missing access_token');
@@ -476,16 +494,14 @@ let chatgptLogin: {
 let chatgptLoginError: string | null = null;
 
 /** Step 1: request a one-time code from the device-authorization endpoint. */
-async function chatgptDeviceStart(timeoutMs: number): Promise<{ verificationUrl: string; userCode: string; intervalMs: number; expiresAt: number }> {
-	const res = await fetch(CHATGPT_USERCODE_URL, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-		body: JSON.stringify({ client_id: CHATGPT_CLIENT_ID }),
-		signal: AbortSignal.timeout(timeoutMs)
-	});
+async function chatgptDeviceStart(timeoutMs: number, proxyUrl?: string): Promise<{ verificationUrl: string; userCode: string; intervalMs: number; expiresAt: number }> {
+	const res = await getJson(CHATGPT_USERCODE_URL, {
+		'Content-Type': 'application/json',
+		'Accept': 'application/json'
+	}, proxyUrl, timeoutMs, 'POST', JSON.stringify({ client_id: CHATGPT_CLIENT_ID }));
 	const json: any = await res.json().catch(() => null);
 	if (!res.ok || json === null) {
-		throw new Error(`ChatGPT device code request failed: ${json?.error_description || json?.error || `HTTP ${res.status}`}`);
+		throw new Error(`ChatGPT device code request failed: ${chatgptErrorText(json, `HTTP ${res.status}`)}`);
 	}
 	const userCode = json.user_code ?? json.usercode;
 	const deviceAuthId = json.device_auth_id;
@@ -508,7 +524,7 @@ async function chatgptDeviceStart(timeoutMs: number): Promise<{ verificationUrl:
 	// Fire-and-forget: the poll records terminal failures in
 	// chatgptLoginError (never throws into an unhandled rejection — that
 	// would crash the host process); the catch is belt-and-braces.
-	void chatgptDevicePoll(deviceAuthId, userCode, intervalMs).catch((e) => {
+	void chatgptDevicePoll(deviceAuthId, userCode, intervalMs, proxyUrl).catch((e) => {
 		chatgptLoginError = String((e as Error)?.message || e);
 	});
 	return { verificationUrl: CHATGPT_DEVICE_VERIFY_URL, userCode, intervalMs, expiresAt };
@@ -521,7 +537,7 @@ async function chatgptDeviceStart(timeoutMs: number): Promise<{ verificationUrl:
  * Errors (pending/denied/expired) are swallowed here and surfaced to the
  * UI via chatgptLoginStatus().
  */
-async function chatgptDevicePoll(deviceAuthId: string, userCode: string, initialIntervalMs: number): Promise<void> {
+async function chatgptDevicePoll(deviceAuthId: string, userCode: string, initialIntervalMs: number, proxyUrl?: string): Promise<void> {
 	const deadline = Date.now() + 15 * 60 * 1000;
 	let intervalMs = initialIntervalMs;
 	let lastError: string | undefined;
@@ -530,19 +546,17 @@ async function chatgptDevicePoll(deviceAuthId: string, userCode: string, initial
 		await new Promise((r) => setTimeout(r, intervalMs));
 		if (chatgptLogin?.abort || chatgptLogin?.userCode !== userCode) return;
 		try {
-			const res = await fetch(CHATGPT_DEVICETOKEN_URL, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-				body: JSON.stringify({ device_auth_id: deviceAuthId, user_code: userCode }),
-				signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
-			});
+			const res = await getJson(CHATGPT_DEVICETOKEN_URL, {
+				'Content-Type': 'application/json',
+				'Accept': 'application/json'
+			}, proxyUrl, UPSTREAM_TIMEOUT_MS, 'POST', JSON.stringify({ device_auth_id: deviceAuthId, user_code: userCode }));
 			const json: any = await res.json().catch(() => null);
 			if (!json) continue;
 			if (json.authorization_code) {
 				const verifier = typeof json.code_verifier === 'string' && json.code_verifier
 					? json.code_verifier
 					: chatgptPkce().verifier;
-				const tokens = await chatgptExchangeCode(String(json.authorization_code), verifier);
+				const tokens = await chatgptExchangeCode(String(json.authorization_code), verifier, UPSTREAM_TIMEOUT_MS, proxyUrl);
 				await writeChatGPTDshStore(tokens);
 				chatgptTokenCache = { bundle: tokens };
 				chatgptLogin = null;
@@ -566,7 +580,7 @@ async function chatgptDevicePoll(deviceAuthId: string, userCode: string, initial
 }
 
 /** Step 3: exchange an authorization_code (with PKCE) for a token bundle. */
-async function chatgptExchangeCode(code: string, codeVerifier: string, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<ChatGPTTokenBundle> {
+async function chatgptExchangeCode(code: string, codeVerifier: string, timeoutMs = UPSTREAM_TIMEOUT_MS, proxyUrl?: string): Promise<ChatGPTTokenBundle> {
 	const body = new URLSearchParams({
 		grant_type: 'authorization_code',
 		code,
@@ -574,15 +588,12 @@ async function chatgptExchangeCode(code: string, codeVerifier: string, timeoutMs
 		client_id: CHATGPT_CLIENT_ID,
 		code_verifier: codeVerifier
 	}).toString();
-	const res = await fetch(CHATGPT_TOKEN_URL, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-		body,
-		signal: AbortSignal.timeout(timeoutMs)
-	});
+	const res = await getJson(CHATGPT_TOKEN_URL, {
+		'Content-Type': 'application/x-www-form-urlencoded'
+	}, proxyUrl, timeoutMs, 'POST', body);
 	const json: any = await res.json().catch(() => null);
 	if (!res.ok || json === null) {
-		throw new Error(`ChatGPT token exchange failed: ${json?.error_description || json?.error || `HTTP ${res.status}`}`);
+		throw new Error(`ChatGPT token exchange failed: ${chatgptErrorText(json, `HTTP ${res.status}`)}`);
 	}
 	if (typeof json.access_token !== 'string' || json.access_token.length === 0) {
 		throw new Error('ChatGPT token exchange response missing access_token');
@@ -638,7 +649,7 @@ function chatgptLoginStatus(): { active: boolean; verificationUrl?: string; user
  *   2. DSH-managed store (device-code login) — refreshed and written back
  *   3. ~/.codex/auth.json (Codex CLI login) — refreshed in memory only
  */
-async function resolveChatGPTToken(timeoutMs: number): Promise<{ accessToken: string; accountId?: string }> {
+async function resolveChatGPTToken(timeoutMs: number, proxyUrl?: string): Promise<{ accessToken: string; accountId?: string }> {
 	const now = Date.now();
 	const cached = chatgptTokenCache?.bundle;
 	if (cached && cached.access_token && (!cached.expires_at_ms || cached.expires_at_ms - now > 30_000)) {
@@ -652,7 +663,7 @@ async function resolveChatGPTToken(timeoutMs: number): Promise<{ accessToken: st
 			return { accessToken: dsh.access_token, accountId: dsh.account_id };
 		}
 		if (dsh.refresh_token) {
-			const refreshed = await refreshChatGPTToken(dsh.refresh_token, timeoutMs);
+			const refreshed = await refreshChatGPTToken(dsh.refresh_token, timeoutMs, proxyUrl);
 			if (!refreshed.account_id) refreshed.account_id = dsh.account_id;
 			await writeChatGPTDshStore(refreshed).catch(() => {});
 			chatgptTokenCache = { bundle: refreshed };
@@ -668,7 +679,7 @@ async function resolveChatGPTToken(timeoutMs: number): Promise<{ accessToken: st
 	if (!fromDisk.refresh_token) {
 		throw new Error('ChatGPT: access token expired and no refresh_token — log in again');
 	}
-	const refreshed = await refreshChatGPTToken(fromDisk.refresh_token, timeoutMs);
+	const refreshed = await refreshChatGPTToken(fromDisk.refresh_token, timeoutMs, proxyUrl);
 	if (!refreshed.account_id) refreshed.account_id = fromDisk.account_id;
 	chatgptTokenCache = { bundle: refreshed };
 	return { accessToken: refreshed.access_token, accountId: refreshed.account_id };
@@ -678,13 +689,13 @@ async function resolveChatGPTToken(timeoutMs: number): Promise<{ accessToken: st
  * Call the experimental ChatGPT usage endpoint. On a 401 the caller may
  * retry once after forcing a token refresh.
  */
-async function fetchChatGPTUsage(accessToken: string, accountId: string | undefined, timeoutMs: number): Promise<any> {
+async function fetchChatGPTUsage(accessToken: string, accountId: string | undefined, timeoutMs: number, proxyUrl?: string): Promise<any> {
 	const headers: Record<string, string> = {
 		'Authorization': `Bearer ${accessToken}`,
 		'Accept': 'application/json'
 	};
 	if (accountId) headers['ChatGPT-Account-Id'] = accountId;
-	const res = await fetch(CHATGPT_USAGE_URL, { headers, signal: AbortSignal.timeout(timeoutMs) });
+	const res = await getJson(CHATGPT_USAGE_URL, headers, proxyUrl, timeoutMs);
 	const body: any = await res.json().catch(() => null);
 	if (res.status === 401) {
 		const err: any = new Error('ChatGPT: access token rejected (401)');
@@ -1208,17 +1219,22 @@ function rowSpec(provider) {
 }
 
 /**
- * GET one URL as JSON through an HTTP(S) proxy without external
+ * Request one URL as JSON through an HTTP(S) proxy without external
  * dependencies. https targets go through a CONNECT tunnel (TLS over the
  * tunnel socket); http targets are requested with their absolute URI.
  * Redirects are not followed; quota endpoints answer directly.
- * @param {string} targetUrl - absolute http(s) URL to fetch.
+ * @param {string} targetUrl - absolute http(s) URL to request.
  * @param {string} proxyUrl - http(s) proxy URL, may carry user:pass.
  * @param {object} headers - request headers (authorization, ...).
  * @param {number} timeoutMs - whole-operation timeout.
+ * @param {string} [method] - HTTP method (default GET).
+ * @param {string} [body] - request body (JSON or form string).
  * @returns {Promise<{ok: boolean, status: number, json(): Promise<any>}>}
  */
-function proxiedGetJson(targetUrl: string, proxyUrl: string, headers: Record<string, string>, timeoutMs: number): Promise<any> {
+function proxiedGetJson(targetUrl: string, proxyUrl: string, headers: Record<string, string>, timeoutMs: number, method: string = 'GET', body?: string): Promise<any> {
+	const reqHeaders = body !== undefined
+		? { ...headers, 'content-length': String(Buffer.byteLength(body, 'utf8')) }
+		: { ...headers };
 	return new Promise((resolve, reject) => {
 		const target = new URL(targetUrl);
 		const proxy = new URL(proxyUrl);
@@ -1267,7 +1283,7 @@ function proxiedGetJson(targetUrl: string, proxyUrl: string, headers: Record<str
 				res.once('error', fail);
 			});
 			req.once('error', fail);
-			req.end();
+			req.end(body);
 		};
 		if (target.protocol === 'https:') {
 			const connect = http.request({
@@ -1289,37 +1305,39 @@ function proxiedGetJson(targetUrl: string, proxyUrl: string, headers: Record<str
 				secure.once('error', fail);
 				readResponse(https.request({
 					createConnection: () => secure,
-					method: 'GET',
+					method,
 					host: target.hostname,
 					port: target.port || 443,
 					path: `${target.pathname}${target.search}`,
-					headers
+					headers: reqHeaders
 				}));
 			});
 			connect.end();
 		} else {
 			readResponse(http.request({
 				createConnection: () => sock,
-				method: 'GET',
+				method,
 				host: target.hostname,
 				port: proxyPort,
 				path: targetUrl,
-				headers
+				headers: reqHeaders
 			}));
 		}
 	});
 }
 
 /**
- * GET one provider URL as JSON, direct or through the row's proxy.
+ * Request one provider URL as JSON, direct or through the row's proxy.
+ * @param {string} [method] - HTTP method (default GET).
+ * @param {string} [body] - request body (JSON or form string).
  * @returns {Promise<{ok: boolean, status: number, json(): Promise<any>}>}
  */
-async function getJson(url, headers, proxyUrl, timeoutMs) {
+async function getJson(url, headers, proxyUrl, timeoutMs, method: string = 'GET', body?: string) {
 	if (proxyUrl === undefined) {
-		const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+		const res = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(timeoutMs) });
 		return { ok: res.ok, status: res.status, json: () => res.json() };
 	}
-	return proxiedGetJson(url, proxyUrl, headers, timeoutMs);
+	return proxiedGetJson(url, proxyUrl, headers, timeoutMs, method, body);
 }
 
 /**
@@ -1507,18 +1525,23 @@ async function fetchRow(ctx, provider, proxies, clientProxyUrl) {
 		// we force a single token refresh retry.
 		if (provider.format === 'chatgpt-subscription') {
 			try {
-				let { accessToken, accountId } = await resolveChatGPTToken(UPSTREAM_TIMEOUT_MS);
+				// Per-row proxy (client override or config) covers the usage
+				// query AND token refresh — same region constraints apply.
+				const cgProxy = clientProxyUrl !== undefined
+					? clientProxyUrl
+					: (provider.proxy !== undefined ? proxies[provider.proxy] : undefined);
+				let { accessToken, accountId } = await resolveChatGPTToken(UPSTREAM_TIMEOUT_MS, cgProxy);
 				let body: any;
 				try {
-					body = await fetchChatGPTUsage(accessToken, accountId, UPSTREAM_TIMEOUT_MS);
+					body = await fetchChatGPTUsage(accessToken, accountId, UPSTREAM_TIMEOUT_MS, cgProxy);
 				} catch (e) {
 					if ((e as any)?.code === 'chatgpt-auth') {
 						// Drop the cached token and refresh once.
 						chatgptTokenCache = null;
-						const refreshed = await resolveChatGPTToken(UPSTREAM_TIMEOUT_MS);
+						const refreshed = await resolveChatGPTToken(UPSTREAM_TIMEOUT_MS, cgProxy);
 						accessToken = refreshed.accessToken;
 						accountId = refreshed.accountId;
-						body = await fetchChatGPTUsage(accessToken, accountId, UPSTREAM_TIMEOUT_MS);
+						body = await fetchChatGPTUsage(accessToken, accountId, UPSTREAM_TIMEOUT_MS, cgProxy);
 					} else {
 						throw e;
 					}
@@ -1646,9 +1669,22 @@ export function apply(ctx, config: Record<string, any> = {}) {
 				};
 			}
 			if (endpoint === 'chatgpt-login-start') {
+				// Optional per-login proxy (settings panel): the whole device
+				// flow (usercode → poll → exchange) goes through it — the
+				// user may need it to reach auth.openai.com at all.
+				let loginProxy: string | undefined;
+				const rawProxy = payload && typeof payload === 'object' && typeof payload.proxy === 'string' ? payload.proxy.trim() : '';
+				if (rawProxy) {
+					try {
+						parseHttpProxyUrl(rawProxy);
+						loginProxy = rawProxy;
+					} catch (error) {
+						return { ok: false, error: { code: 'invalid-proxy', message: `proxy "${rawProxy}": ${error instanceof Error ? error.message : 'is not a valid URL'}`, details: {} } };
+					}
+				}
 				// Cancel any in-flight login, then start a fresh one.
 				if (chatgptLogin) chatgptLogin.abort = true;
-				const info = await chatgptDeviceStart(UPSTREAM_TIMEOUT_MS);
+				const info = await chatgptDeviceStart(UPSTREAM_TIMEOUT_MS, loginProxy);
 				return { ok: true, value: info };
 			}
 			if (endpoint === 'chatgpt-login-cancel') {

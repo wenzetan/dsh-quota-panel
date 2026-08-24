@@ -620,6 +620,55 @@ process.env.CODEX_HOME = prevCodexHome;
 			globalThis.fetch = realFetch2;
 		}
 	}
+	// Region-blocked usercode request: auth.openai.com answers 403 with a
+	// NESTED error object (real body captured 2026-08):
+	//   {"error":{"code":"unsupported_country_region_territory","message":"Country, region, or territory not supported",...}}
+	// The surfaced message must carry message + code — never "[object Object]".
+	{
+		const realFetch3 = globalThis.fetch;
+		globalThis.fetch = async () => ({
+			ok: false, status: 403,
+			json: async () => ({ error: { code: 'unsupported_country_region_territory', message: 'Country, region, or territory not supported', param: null, type: 'request_forbidden' } })
+		});
+		try {
+			const start = await h3('chatgpt-login-start', null, undefined);
+			const msg = (start.ok === false && start.error && start.error.message) || '';
+			check('A: nested oauth error object is rendered, not [object Object]',
+				start.ok === false && msg.includes('Country, region, or territory not supported')
+					&& msg.includes('unsupported_country_region_territory') && !msg.includes('[object Object]'));
+		} finally {
+			globalThis.fetch = realFetch3;
+		}
+	}
+	// login-start with payload.proxy: the OAuth requests must go through the
+	// proxy (a local CONNECT-refusing proxy), proving the login flow no
+	// longer bypasses the plugin's proxy plumbing. A direct fetch would
+	// surface the 403 region error instead of a proxy failure.
+	{
+		const refProxy = http.createServer((req, res) => { res.destroy(); });
+		refProxy.on('connect', (req, clientSocket) => {
+			clientSocket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+			clientSocket.destroy();
+		});
+		await new Promise((r) => refProxy.listen(0, '127.0.0.1', r));
+		const refPort = refProxy.address().port;
+		const realFetch4 = globalThis.fetch;
+		let directHit = false;
+		globalThis.fetch = async () => { directHit = true; return { ok: false, status: 403, json: async () => ({ error: { code: 'unsupported_country_region_territory', message: 'nope', param: null, type: 'request_forbidden' } }) }; };
+		try {
+			const start = await h3('chatgpt-login-start', { proxy: `http://127.0.0.1:${refPort}` }, undefined);
+			const msg = (start.ok === false && start.error && start.error.message) || '';
+			check('A: login-start routes the device flow through payload.proxy',
+				start.ok === false && /proxy CONNECT failed/i.test(msg) && directHit === false);
+		} finally {
+			globalThis.fetch = realFetch4;
+			refProxy.close();
+		}
+		// invalid proxy URL is rejected up front with a clear message
+		const bad = await h3('chatgpt-login-start', { proxy: 'ftp://not-a-proxy' }, undefined);
+		check('A: login-start rejects a non-http(s) proxy url', bad.ok === false && /proxy/i.test(bad.error?.message || ''));
+		await h3('chatgpt-login-cancel', null, undefined);
+	}
 	process.env.DSH_HOME = prevDsh;
 	process.env.CODEX_HOME = prevCodex;
 }
@@ -1047,6 +1096,13 @@ check('B: renderer returns element', element && typeof element.type === 'functio
 	check('B: weekly-only usage text shows reset inline and drops empty 滚/月', weeklyOnly.usageText === '7天 80% · 下次重置 ' + fmtLocalReset('2026-08-21T12:01:00.000Z'));
 	check('B: multi-window usage text keeps 滚/周/月 and no inline reset', modeView.auto.usageText === 'winRolling 1% · winWeekly 40% · winMonthly 1%');
 	check('B: capsule mode setting + dictionary keys shipped', clientSource.includes('capsuleMode') && clientSource.includes('settingsCapsule') && clientSource.includes('capsuleAuto') && clientSource.includes('capsuleRolling') && clientSource.includes('capsuleWeekly') && clientSource.includes('capsuleMax'));
+	// ChatGPT account section: the proxy input lives INSIDE the section
+	// (the row may not be on the panel yet, so the generic per-row proxy
+	// grid cannot host it) and login-start forwards it as payload.proxy.
+	check('B: chatgpt proxy input + payload forwarding shipped',
+		clientSource.includes('chatgptProxy') && clientSource.includes('chatgptProxyHint')
+			&& clientSource.includes('"chatgpt-login-start", { proxy: cgProxy || null }')
+			&& clientSource.includes('proxy.chatgpt'));
 	// Layout fixes from issue #1: the capsule must clear the bottom status
 	// row, and the shell overlay layer must not sit UNDER body-mounted
 	// third-party fixed panels (z-index 1000+).
