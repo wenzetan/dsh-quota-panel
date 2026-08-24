@@ -401,7 +401,13 @@ jobs:
             SHA="$TAGOBJ"
           fi
           echo "promoting $RC (commit $SHA) -> $STABLE"
-          CONCLUSION="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow CI --limit 1 --json conclusion --jq '.[0].conclusion // "none"')"
+          # Look up CI on the rc TAG's own run (--branch "$RC": the tag job
+          # dispatches one right after creating each rc tag, so its
+          # head_branch is the tag name). Filtering by commit alone would
+          # match THIS promote run itself — dispatched on main, whose head
+          # is the rc commit — and read its own in-flight conclusion: a
+          # self-shadowing deadlock that could never pass.
+          CONCLUSION="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow CI --branch "$RC" --limit 1 --json conclusion --jq '.[0].conclusion // "none"')"
           if [ "$CONCLUSION" != "success" ]; then
             echo "::error::CI for $RC is '$CONCLUSION' (need success) — fix or re-tag before promoting"
             exit 1
