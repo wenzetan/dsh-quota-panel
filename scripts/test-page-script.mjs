@@ -10,9 +10,16 @@
 // shell.overlay slot registration, and the settings-panel surface.
 import vm from 'node:vm';
 import http from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+
+// Hermetic default: point CODEX_HOME at an empty temp dir so the ChatGPT
+// subscription row (which auto-discovers ~/.codex/auth.json) does not leak
+// the developer's real Codex auth into the host-side test environment.
+// ChatGPT-specific tests below override CODEX_HOME with a fixture dir.
+process.env.CODEX_HOME = process.env.CODEX_HOME || mkdtempSync(join(tmpdir(), 'dsh-qp-test-'));
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const plugin = await import(`file://${join(root, 'lib/index.js')}`);
@@ -437,6 +444,153 @@ try {
 		&& /credentialScope\s*=\s*`\$\{shortDate\}\/\$\{region\}\/\$\{VOLCENGINE_SERVICE\}\/request`/.test(codeOnly)
 		&& !/AWS4/.test(codeOnly)
 	);
+}
+// ---------- A2c: ChatGPT subscription (Codex OAuth, ~/.codex/auth.json) ----------
+// The row auto-discovers only when CODEX_HOME/auth.json exists. We point
+// CODEX_HOME at a temp fixture and stub fetch for the wham/usage endpoint.
+const codexFixture = mkdtempSync(join(tmpdir(), 'dsh-qp-codex-'));
+writeFileSync(join(codexFixture, 'auth.json'), JSON.stringify({
+	auth_mode: 'chatgpt',
+	tokens: {
+		access_token: 'eyJ.fake-access',
+		refresh_token: 'rt-fake',
+		account_id: 'acct-test-123',
+		expires_at: Math.floor(Date.now() / 1000) + 3600
+	}
+}));
+const prevCodexHome = process.env.CODEX_HOME;
+process.env.CODEX_HOME = codexFixture;
+// Re-import the plugin module fresh so it reads the new CODEX_HOME (the path
+// helpers are evaluated lazily, but the catalog endpoint constant is set at
+// load — it is constant regardless, so a plain apply() suffices).
+let cgHandler;
+{
+	const cgRegs = [];
+	const cgCtx = {
+		connection: { rpc: { handle: (ch, h) => { cgRegs.push({ ch, h }); return async () => {}; } } },
+		credentials: { resolve: async () => undefined }
+	};
+	plugin.apply(cgCtx, {});
+	cgHandler = cgRegs[0].h;
+}
+const cgSpecs = await cgHandler('specs', null, undefined);
+check('A: chatgpt row discovered when auth.json exists', (() => {
+	const row = cgSpecs.value.rows.find((r) => r.id === 'chatgpt');
+	return !!row && row.kind === 'usage' && row.windowLabels?.rolling === '5h' && row.windowLabels?.weekly === '周';
+})());
+check('A: chatgpt row leaks no credential/endpoint', (() => {
+	const text = JSON.stringify(cgSpecs);
+	return !text.includes('fake-access') && !text.includes('auth.json') && !text.includes('endpoint');
+})());
+// Stub fetch: first call returns a Plus weekly window, second (for refresh test) 401.
+let cgCallCount = 0;
+globalThis.fetch = async (url, init) => {
+	const s = String(url);
+	cgCallCount++;
+	if (s.includes('backend-api/wham/usage')) {
+		return {
+			ok: true, status: 200,
+			json: async () => ({
+				plan_type: 'plus',
+				rate_limit: {
+					allowed: true, limit_reached: false,
+					primary_window: { used_percent: 42, limit_window_seconds: 604800, reset_at: 1787833892 },
+					secondary_window: null
+				},
+				credits: { has_credits: false, unlimited: false, balance: '0' }
+			})
+		};
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+let cgFetch;
+try { cgFetch = await cgHandler('fetch-all', {}, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: chatgpt plus -> weekly usage window parsed', (() => {
+	const row = cgFetch.value.rows.find((r) => r.id === 'chatgpt');
+	return row?.view?.kind === 'usage'
+		&& row.view.windows?.weekly?.percent === 42
+		&& row.view.windows?.rolling === undefined
+		&& typeof row.view.windows?.weekly?.resetsAt === 'string'
+		&& /plan: plus/.test(row.view.title);
+})());
+// Pro plan (secondary 5h window present)
+globalThis.fetch = async (url) => {
+	if (String(url).includes('backend-api/wham/usage')) {
+		return {
+			ok: true, status: 200,
+			json: async () => ({
+				plan_type: 'pro',
+				rate_limit: {
+					allowed: true, limit_reached: false,
+					primary_window: { used_percent: 60, limit_window_seconds: 604800, reset_at: 1787833892 },
+					secondary_window: { used_percent: 25, limit_window_seconds: 18000, reset_at: 1787400000 }
+				}
+			})
+		};
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+let cgPro;
+try { cgPro = await cgHandler('fetch-all', {}, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: chatgpt pro -> weekly + 5h (rolling) windows', (() => {
+	const row = cgPro.value.rows.find((r) => r.id === 'chatgpt');
+	return row?.view?.windows?.weekly?.percent === 60 && row?.view?.windows?.rolling?.percent === 25;
+})());
+// Missing auth.json -> row hidden (probes file existence)
+process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-nocodex-'));
+const noRegs = [];
+const noCtx = { connection: { rpc: { handle: (ch, h) => { noRegs.push({ ch, h }); return async () => {}; } } }, credentials: { resolve: async () => undefined } };
+plugin.apply(noCtx, {});
+const noSpecs = await noRegs[0].h('specs', null, undefined);
+check('A: chatgpt hidden when auth.json does not exist', !noSpecs.value.rows.some((r) => r.id === 'chatgpt'));
+process.env.CODEX_HOME = prevCodexHome;
+
+// DSH-managed device-login token store: when $DSH_HOME/dsh-quota-panel/chatgpt-auth.json
+// exists but no Codex auth.json does, the row should still appear and the auth-status
+// RPC should report source='dsh'.
+{
+	const prevDsh = process.env.DSH_HOME;
+	const dshHome = mkdtempSync(join(tmpdir(), 'dsh-qp-dshhome-'));
+	process.env.DSH_HOME = dshHome;
+	const storeDir = join(dshHome, 'dsh-quota-panel');
+	mkdirSync(storeDir, { recursive: true });
+	const exp = Date.now() + 3600_000;
+	writeFileSync(join(storeDir, 'chatgpt-auth.json'), JSON.stringify({
+		source: 'dsh', account_id: 'acct-dsh-1', plan_type: 'pro',
+		tokens: { access_token: 'eyJ.dsh-access', refresh_token: 'rt-dsh', id_token: 'x', expires_at_ms: exp }
+	}));
+	const regs = [];
+	const ctx2 = { connection: { rpc: { handle: (ch, h) => { regs.push({ ch, h }); return async () => {}; } } }, credentials: { resolve: async () => undefined } };
+	plugin.apply(ctx2, {});
+	const h2 = regs[0].h;
+	const s2 = await h2('specs', null, undefined);
+	check('A: chatgpt discovered via DSH store without Codex auth.json', s2.value.rows.some((r) => r.id === 'chatgpt'));
+	const st = await h2('chatgpt-auth-status', null, undefined);
+	check('A: chatgpt-auth-status reports source=dsh + plan', st.ok && st.value.source === 'dsh' && st.value.loggedIn === true && st.value.plan_type === 'pro');
+	// logout removes the DSH store and flips status
+	await h2('chatgpt-logout', null, undefined);
+	const st2 = await h2('chatgpt-auth-status', null, undefined);
+	check('A: chatgpt-logout clears DSH store', st2.ok && st2.value.loggedIn === false && st2.value.source === null);
+	process.env.DSH_HOME = prevDsh;
+}
+// chatgpt-login-start: when there is no Codex auth and no DSH store, the host
+// should return a one-time code + verification URL (network permitting). We do
+// not hit the real network in CI; just assert the RPC surface exists and
+// cancelling leaves no in-flight state.
+{
+	const prevDsh = process.env.DSH_HOME;
+	const prevCodex = process.env.CODEX_HOME;
+	process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-empty-dsh-'));
+	process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-empty-codex-'));
+	const regs = [];
+	const ctx3 = { connection: { rpc: { handle: (ch, h) => { regs.push({ ch, h }); return async () => {}; } } }, credentials: { resolve: async () => undefined } };
+	plugin.apply(ctx3, {});
+	const h3 = regs[0].h;
+	// cancel is safe even with nothing in flight
+	const c = await h3('chatgpt-login-cancel', null, undefined);
+	check('A: chatgpt-login-cancel is safe with no in-flight login', c.ok === true && c.value.cancelled === true);
+	process.env.DSH_HOME = prevDsh;
+	process.env.CODEX_HOME = prevCodex;
 }
 
 // ---------- A2d: search lane unknown / absent weekly (no fabricated 0%) ----------
