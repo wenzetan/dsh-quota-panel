@@ -466,6 +466,14 @@ let chatgptLogin: {
 	expiresAt: number;
 	abort: boolean;
 } | null = null;
+/**
+ * Terminal error of the last in-flight device login (timeout / denied /
+ * expired), recorded instead of thrown: the poll promise is deliberately
+ * fire-and-forget, and an unhandled rejection would kill the whole DSH
+ * host process under Node's default --unhandled-rejections=throw.
+ * Surfaced to the UI via chatgpt-auth-status and cleared on a new start.
+ */
+let chatgptLoginError: string | null = null;
 
 /** Step 1: request a one-time code from the device-authorization endpoint. */
 async function chatgptDeviceStart(timeoutMs: number): Promise<{ verificationUrl: string; userCode: string; intervalMs: number; expiresAt: number }> {
@@ -488,6 +496,7 @@ async function chatgptDeviceStart(timeoutMs: number): Promise<{ verificationUrl:
 	const intervalMs = Number.isFinite(intervalSec) && intervalSec > 0 ? intervalSec * 1000 : 5000;
 	// The one-time code expires in 15 minutes (per Codex's device flow).
 	const expiresAt = Date.now() + 15 * 60 * 1000;
+	chatgptLoginError = null;
 	chatgptLogin = {
 		startedAt: Date.now(),
 		verificationUrl: CHATGPT_DEVICE_VERIFY_URL,
@@ -496,7 +505,12 @@ async function chatgptDeviceStart(timeoutMs: number): Promise<{ verificationUrl:
 		expiresAt,
 		abort: false
 	};
-	void chatgptDevicePoll(deviceAuthId, userCode, intervalMs);
+	// Fire-and-forget: the poll records terminal failures in
+	// chatgptLoginError (never throws into an unhandled rejection — that
+	// would crash the host process); the catch is belt-and-braces.
+	void chatgptDevicePoll(deviceAuthId, userCode, intervalMs).catch((e) => {
+		chatgptLoginError = String((e as Error)?.message || e);
+	});
 	return { verificationUrl: CHATGPT_DEVICE_VERIFY_URL, userCode, intervalMs, expiresAt };
 }
 
@@ -532,6 +546,7 @@ async function chatgptDevicePoll(deviceAuthId: string, userCode: string, initial
 				await writeChatGPTDshStore(tokens);
 				chatgptTokenCache = { bundle: tokens };
 				chatgptLogin = null;
+				chatgptLoginError = null;
 				return;
 			}
 			// authorization_pending / slow_down / access_denied / expired_token
@@ -545,7 +560,9 @@ async function chatgptDevicePoll(deviceAuthId: string, userCode: string, initial
 		}
 	}
 	chatgptLogin = null;
-	throw new Error(lastError ? `ChatGPT login failed: ${lastError}` : 'ChatGPT login timed out');
+	// Record (do NOT throw): nothing awaits this promise, and an unhandled
+	// rejection crashes the DSH host process (Node's default policy).
+	chatgptLoginError = lastError ? `ChatGPT login failed: ${lastError}` : 'ChatGPT login timed out';
 }
 
 /** Step 3: exchange an authorization_code (with PKCE) for a token bundle. */
@@ -605,8 +622,8 @@ function chatgptDecodeIdToken(idToken: string): { account_id?: string; plan_type
 }
 
 /** Snapshot of the current in-flight login for the settings UI to render. */
-function chatgptLoginStatus(): { active: boolean; verificationUrl?: string; userCode?: string; expiresAt?: number } {
-	if (!chatgptLogin || chatgptLogin.abort) return { active: false };
+function chatgptLoginStatus(): { active: boolean; verificationUrl?: string; userCode?: string; expiresAt?: number; error?: string | null } {
+	if (!chatgptLogin || chatgptLogin.abort) return { active: false, error: chatgptLoginError };
 	return {
 		active: true,
 		verificationUrl: chatgptLogin.verificationUrl,
@@ -1637,6 +1654,7 @@ export function apply(ctx, config: Record<string, any> = {}) {
 			if (endpoint === 'chatgpt-login-cancel') {
 				if (chatgptLogin) chatgptLogin.abort = true;
 				chatgptLogin = null;
+				chatgptLoginError = null; // user-initiated cancel is not an error
 				return { ok: true, value: { cancelled: true } };
 			}
 			if (endpoint === 'chatgpt-logout') {

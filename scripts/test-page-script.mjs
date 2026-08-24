@@ -589,6 +589,37 @@ process.env.CODEX_HOME = prevCodexHome;
 	// cancel is safe even with nothing in flight
 	const c = await h3('chatgpt-login-cancel', null, undefined);
 	check('A: chatgpt-login-cancel is safe with no in-flight login', c.ok === true && c.value.cancelled === true);
+	// Regression: a DENIED device login must record the error and keep the
+	// process alive — the poll is fire-and-forget, and the old code threw
+	// from it (unhandled rejection kills the process under Node's default
+	// --unhandled-rejections=throw policy). If this regresses, the test
+	// process itself dies before the check can even run.
+	{
+		const realFetch2 = globalThis.fetch;
+		globalThis.fetch = async (url) => {
+			const u = String(url);
+			if (u.includes('/deviceauth/usercode')) {
+				return { ok: true, status: 200, json: async () => ({ user_code: 'WGJK-MBCD', device_auth_id: 'da_test_1', interval: 1 }) };
+			}
+			if (u.includes('/deviceauth/token')) {
+				return { ok: true, status: 200, json: async () => ({ error: 'access_denied' }) };
+			}
+			return { ok: false, status: 404, json: async () => ({}) };
+		};
+		try {
+			const start = await h3('chatgpt-login-start', null, undefined);
+			check('A: chatgpt-login-start returns code + url', start.ok === true && !!start.value.userCode && !!start.value.verificationUrl);
+			await new Promise((r) => setTimeout(r, 2000));
+			const st = await h3('chatgpt-auth-status', null, undefined);
+			check('A: denied device login records error instead of crashing', st.ok === true && st.value.login.active === false && /access_denied|denied/i.test(st.value.login.error || ''));
+			// a fresh start clears the recorded error
+			await h3('chatgpt-login-cancel', null, undefined);
+			const st3 = await h3('chatgpt-auth-status', null, undefined);
+			check('A: cancel clears the recorded login error', st3.ok === true && !st3.value.login.error);
+		} finally {
+			globalThis.fetch = realFetch2;
+		}
+	}
 	process.env.DSH_HOME = prevDsh;
 	process.env.CODEX_HOME = prevCodex;
 }

@@ -514,13 +514,17 @@
 			React.useEffect(function () {
 				refresh();
 				// While a login is in-flight, poll for completion; the host
-				// flips `login.active` to false when it obtains tokens.
+				// flips `login.active` to false when it obtains tokens (or,
+				// on failure, records the terminal error in login.error).
 				var timer = setInterval(function () {
 					call("chatgpt-auth-status", null).then(function (r) {
 						if (r && r.ok) {
 							setStatus(r.value);
 							if (!r.value.login || !r.value.login.active) {
 								setBusy(false);
+								if (r.value.login && r.value.login.error) {
+									setError(r.value.login.error);
+								}
 							}
 						}
 					}).catch(function () {});
@@ -861,7 +865,8 @@
 				};
 
 				var loadSpecs = function () {
-					return ctx.connection.rpc.call(CHANNEL, "specs", null).then(function (result) {						if (result && result.ok === true && result.value && Array.isArray(result.value.rows)) {
+					return ctx.connection.rpc.call(CHANNEL, "specs", null).then(function (result) {
+						if (result && result.ok === true && result.value && Array.isArray(result.value.rows)) {
 							setSpecs(result.value);
 						} else {
 							setLoadError(result && result.error ? result.error.message : t("loadFailed"));

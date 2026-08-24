@@ -357,10 +357,15 @@ jobs:
 
   # Manual promotion: the human confirmation step for stable versions.
   # Dispatch with `rc_tag` set (e.g. v0.9.0-rc.3) — this job verifies that
-  # tag's CI run was green on exactly that commit, then creates the stable
-  # twin v0.9.0 on the same commit and dispatches the release run. If the
-  # `production` environment has a required reviewer, release-stable waits
-  # there for a second, explicit approval.
+  # tag's CI run was green on exactly that commit, then creates a
+  # VERSION-ONLY bump commit on top of it (package.json X.Y.Z, replacing the
+  # rc suffix — npm refuses to publish a prerelease version to latest, and a
+  # stable release must ship the plain version anyway), tags it as the
+  # stable twin v0.9.0, and dispatches the release run. The bump keeps the
+  # stable tag's tree identical to the validated rc except for the version
+  # string, so check+boot on the tag re-verifies exactly the shipped bits.
+  # If the `production` environment has a required reviewer, release-stable
+  # waits there for a second, explicit approval.
   promote:
     if: github.event_name == 'workflow_dispatch' && inputs.rc_tag != ''
     runs-on: ubuntu-latest
@@ -383,8 +388,19 @@ jobs:
             exit 1
           fi
           STABLE="v${RC#v}"; STABLE="${STABLE%%-*}"
-          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RC}" --jq '.object.sha')"
-          echo "promoting $RC ($SHA) -> $STABLE"
+          STABLE_VER="${STABLE#v}"
+          # Annotated tags (all tags this workflow's tag job creates via
+          # `git tag -a`) make git/ref/tags/X return the TAG OBJECT sha,
+          # not the commit; peel it so the CI lookup and the stable twin
+          # both target the actual commit the rc tested.
+          TAGOBJ="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RC}" --jq '.object.sha')"
+          TAGTYPE="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RC}" --jq '.object.type')"
+          if [ "$TAGTYPE" = "tag" ]; then
+            SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${TAGOBJ}" --jq '.object.sha')"
+          else
+            SHA="$TAGOBJ"
+          fi
+          echo "promoting $RC (commit $SHA) -> $STABLE"
           CONCLUSION="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow CI --limit 1 --json conclusion --jq '.[0].conclusion // "none"')"
           if [ "$CONCLUSION" != "success" ]; then
             echo "::error::CI for $RC is '$CONCLUSION' (need success) — fix or re-tag before promoting"
@@ -396,7 +412,22 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$STABLE" -m "Release $STABLE" "$SHA"
+          # Version-only bump commit on top of the validated rc commit. The
+          # surgical replace keeps the diff to the single version line
+          # (re-serializing the whole file would churn formatting).
+          git checkout --detach "$SHA"
+          if ! grep -q "\"version\": \"$STABLE_VER\"" package.json; then
+            if ! sed -i "s/\"version\": \"[0-9][^\"]*\"/\"version\": \"$STABLE_VER\"/" package.json; then
+              echo "::error::failed to set version $STABLE_VER in package.json"
+              exit 1
+            fi
+          fi
+          if ! git diff --quiet -- package.json; then
+            git add package.json
+            git commit -m "$STABLE: promote $RC to stable (version-only)"
+          fi
+          STABLE_SHA="$(git rev-parse HEAD)"
+          git tag -a "$STABLE" -m "Release $STABLE (stable twin of $RC; version-only bump)" "$STABLE_SHA"
           git push origin "$STABLE"
           echo "stable_tag=$STABLE" >> "$GITHUB_OUTPUT"
       - name: Trigger the release run on the stable tag
