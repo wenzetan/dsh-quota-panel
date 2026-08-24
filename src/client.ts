@@ -380,9 +380,22 @@
 				var titleLine = function (label, v, win) {
 					return label + ": " + (v === null ? t("noWinData") : v + "% · " + t("nextReset", { time: fmtNextReset(t, win && win.resetsAt) }));
 				};
-				var textSegs = [fmtWin(labels.rolling, rp)];
-				if (wp !== null) textSegs.push(fmtWin(labels.weekly, wp));
-				textSegs.push(labels.monthly + " " + (mp === null ? "-%" : mp + "%"));
+				// Weekly-only plans (ChatGPT Plus / Codex, Kimi weekly) have no
+				// rolling or monthly window. Drop the empty 滚 / 月 noise and
+				// surface the weekly reset time inline — it otherwise lives
+				// only in the hover title.
+				var weeklyOnly = rp === null && wp !== null && mp === null;
+				var textSegs;
+				if (weeklyOnly) {
+					textSegs = [fmtWin(labels.weekly, wp)];
+					if (w.weekly && w.weekly.resetsAt) {
+						textSegs.push(t("nextReset", { time: fmtNextReset(t, w.weekly.resetsAt) }));
+					}
+				} else {
+					textSegs = [fmtWin(labels.rolling, rp)];
+					if (wp !== null) textSegs.push(fmtWin(labels.weekly, wp));
+					textSegs.push(labels.monthly + " " + (mp === null ? "-%" : mp + "%"));
+				}
 				var titleLines = [titleLine(labels.rolling, rp, w.rolling)];
 				if (wp !== null) titleLines.push(titleLine(labels.weekly, wp, w.weekly));
 				titleLines.push(titleLine(labels.monthly, mp, w.monthly));
