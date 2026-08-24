@@ -850,8 +850,16 @@ check('B: renderer returns element', element && typeof element.type === 'functio
 	const noRolling = { view: { kind: 'usage', windows: { weekly: { percent: 80, resetsAt: '2026-08-21T12:01:00.000Z' } } } };
 	check('B: capsule rolling on a plan without rolling falls back to highest', rowView(t2, { ...baseSpec, capsuleMode: 'rolling' }, noRolling).summary === '80%');
 	const tReset = (key, params) => (key === 'nextReset' ? `下次重置 ${params.time}` : key);
+	// fmtNextReset renders in the runner's LOCAL timezone, so the expected
+	// string must be computed with the same local-time formatting instead of
+	// a hardcoded literal (CI runs in UTC, dev machines may not).
+	const fmtLocalReset = (iso) => {
+		const d = new Date(iso);
+		const pad = (n) => (n < 10 ? '0' : '') + n;
+		return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+	};
 	const weeklyOnly = rowView(tReset, { ...baseSpec, windowLabels: { weekly: '7天' } }, noRolling);
-	check('B: weekly-only usage text shows reset inline and drops empty 滚/月', weeklyOnly.usageText === '7天 80% · 下次重置 2026-08-21 20:01');
+	check('B: weekly-only usage text shows reset inline and drops empty 滚/月', weeklyOnly.usageText === '7天 80% · 下次重置 ' + fmtLocalReset('2026-08-21T12:01:00.000Z'));
 	check('B: multi-window usage text keeps 滚/周/月 and no inline reset', modeView.auto.usageText === 'winRolling 1% · winWeekly 40% · winMonthly 1%');
 	check('B: capsule mode setting + dictionary keys shipped', clientSource.includes('capsuleMode') && clientSource.includes('settingsCapsule') && clientSource.includes('capsuleAuto') && clientSource.includes('capsuleRolling') && clientSource.includes('capsuleWeekly') && clientSource.includes('capsuleMax'));
 	// Layout fixes from issue #1: the capsule must clear the bottom status
