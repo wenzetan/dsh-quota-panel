@@ -482,59 +482,77 @@ check('A: chatgpt row leaks no credential/endpoint', (() => {
 	const text = JSON.stringify(cgSpecs);
 	return !text.includes('fake-access') && !text.includes('auth.json') && !text.includes('endpoint');
 })());
-// Stub fetch: first call returns a Plus weekly window, second (for refresh test) 401.
-let cgCallCount = 0;
-globalThis.fetch = async (url, init) => {
-	const s = String(url);
-	cgCallCount++;
-	if (s.includes('backend-api/wham/usage')) {
-		return {
-			ok: true, status: 200,
-			json: async () => ({
-				plan_type: 'plus',
-				rate_limit: {
-					allowed: true, limit_reached: false,
-					primary_window: { used_percent: 42, limit_window_seconds: 604800, reset_at: 1787833892 },
-					secondary_window: null
-				},
-				credits: { has_credits: false, unlimited: false, balance: '0' }
-			})
-		};
-	}
-	return { ok: false, status: 404, json: async () => ({}) };
+// wham/usage window mapping (issue #7): the API names windows
+// primary/secondary, not 5h/weekly. On consumer plans primary carries the
+// 5h session window (limit_window_seconds=18000) and secondary the weekly
+// pool (604800) — the official Codex TUI and CodexBar classify by that
+// duration field because the field position is not a contract. These
+// cases pin the mapping for the real layout, a swapped layout, and a
+// no-duration fallback.
+const cgFetchWith = async (body) => {
+	globalThis.fetch = async (url) => String(url).includes('backend-api/wham/usage')
+		? { ok: true, status: 200, json: async () => body }
+		: { ok: false, status: 404, json: async () => ({}) };
+	try { return await cgHandler('fetch-all', {}, undefined); } finally { globalThis.fetch = realFetch; }
 };
-let cgFetch;
-try { cgFetch = await cgHandler('fetch-all', {}, undefined); } finally { globalThis.fetch = realFetch; }
-check('A: chatgpt plus -> weekly usage window parsed', (() => {
-	const row = cgFetch.value.rows.find((r) => r.id === 'chatgpt');
+const cgRow = (r) => r.value.rows.find((row) => row.id === 'chatgpt');
+// Plus: single weekly window carried by primary_window.
+const cgPlus = await cgFetchWith({
+	plan_type: 'plus',
+	rate_limit: {
+		allowed: true, limit_reached: false,
+		primary_window: { used_percent: 42, limit_window_seconds: 604800, reset_at: 1787833892 },
+		secondary_window: null
+	},
+	credits: { has_credits: false, unlimited: false, balance: '0' }
+});
+check('A: chatgpt plus -> weekly-only window parsed', (() => {
+	const row = cgRow(cgPlus);
 	return row?.view?.kind === 'usage'
 		&& row.view.windows?.weekly?.percent === 42
 		&& row.view.windows?.rolling === undefined
 		&& typeof row.view.windows?.weekly?.resetsAt === 'string'
 		&& /plan: plus/.test(row.view.title);
 })());
-// Pro plan (secondary 5h window present)
-globalThis.fetch = async (url) => {
-	if (String(url).includes('backend-api/wham/usage')) {
-		return {
-			ok: true, status: 200,
-			json: async () => ({
-				plan_type: 'pro',
-				rate_limit: {
-					allowed: true, limit_reached: false,
-					primary_window: { used_percent: 60, limit_window_seconds: 604800, reset_at: 1787833892 },
-					secondary_window: { used_percent: 25, limit_window_seconds: 18000, reset_at: 1787400000 }
-				}
-			})
-		};
+// Pro, real layout: primary = 5h session, secondary = weekly pool (issue #7).
+const cgPro = await cgFetchWith({
+	plan_type: 'pro',
+	rate_limit: {
+		allowed: true, limit_reached: false,
+		primary_window: { used_percent: 31, limit_window_seconds: 18000, reset_at: 1787833892 },
+		secondary_window: { used_percent: 100, limit_window_seconds: 604800, reset_at: 1788163200 }
 	}
-	return { ok: false, status: 404, json: async () => ({}) };
-};
-let cgPro;
-try { cgPro = await cgHandler('fetch-all', {}, undefined); } finally { globalThis.fetch = realFetch; }
-check('A: chatgpt pro -> weekly + 5h (rolling) windows', (() => {
-	const row = cgPro.value.rows.find((r) => r.id === 'chatgpt');
+});
+check('A: chatgpt pro -> primary(5h)/secondary(weekly) mapped by duration', (() => {
+	const row = cgRow(cgPro);
+	return row?.view?.windows?.rolling?.percent === 31
+		&& row?.view?.windows?.rolling?.resetsAt === '2026-08-27T12:31:32.000Z'
+		&& row?.view?.windows?.weekly?.percent === 100;
+})());
+// Same numbers with the field positions swapped: duration still wins.
+const cgSwapped = await cgFetchWith({
+	plan_type: 'pro',
+	rate_limit: {
+		allowed: true, limit_reached: false,
+		primary_window: { used_percent: 60, limit_window_seconds: 604800, reset_at: 1787833892 },
+		secondary_window: { used_percent: 25, limit_window_seconds: 18000, reset_at: 1787400000 }
+	}
+});
+check('A: chatgpt swapped field order still mapped by duration', (() => {
+	const row = cgRow(cgSwapped);
 	return row?.view?.windows?.weekly?.percent === 60 && row?.view?.windows?.rolling?.percent === 25;
+})());
+// Durations missing: positional fallback primary = 5h, secondary = weekly.
+const cgNoDur = await cgFetchWith({
+	plan_type: 'pro',
+	rate_limit: {
+		primary_window: { used_percent: 10, reset_at: 1787833892 },
+		secondary_window: { used_percent: 20, reset_at: 1788163200 }
+	}
+});
+check('A: chatgpt missing durations -> positional 5h/weekly defaults', (() => {
+	const row = cgRow(cgNoDur);
+	return row?.view?.windows?.rolling?.percent === 10 && row?.view?.windows?.weekly?.percent === 20;
 })());
 // Missing auth.json -> row hidden (probes file existence)
 process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-nocodex-'));

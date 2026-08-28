@@ -331,7 +331,7 @@ ChatGPT OAuth 令牌调用 Codex 同款的内部用量端点，把 Plus/Pro 套�
 | `zai-coding-quota` | 用量% | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT, unit, number, percentage, currentValue, usage, nextResetTime }] } }` —— 语义映射（glm-plan-usage2，issue #2）：TOKENS_LIMIT `unit=3` → 5h 窗口、`unit=6` → 周、TIME_LIMIT → MCP 月度车道；未知 unit 回退按 `nextResetTime` 排序；各窗口百分比优先取 `percentage` 字段 |
 | `kimi-coding-usage` | 用量% | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` —— 5h = `duration=300` 的窗口、周 = `duration=10080`（缺失时回退顶层 usage）；used = limit − remaining |
 | `volcengine-usage` | 用量% | 不走 `adaptRow`：`fetchRow` 内部以 AK/SK HMAC-SHA256 签名调用火山引擎 OpenAPI `GetAFPUsage` → `GetCodingPlanUsage`（回落），解析 `Result.AFPFiveHour/AFPWeekly/AFPMonthly`（Agent Plan，AFPDaily 跳过）或 `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}`（Coding Plan，仅百分比） |
-| `chatgpt-subscription` | 用量% | `{ plan_type, rate_limit: { primary_window: { used_percent, reset_at }, secondary_window? } }` —— 经 `~/.codex/auth.json` 的 OAuth 令牌读取 Codex 内部用量端点；primary 映射为周窗口，secondary（Pro）映射为 5h 窗口。实验性接口 |
+| `chatgpt-subscription` | 用量% | `{ plan_type, rate_limit: { primary_window: { used_percent, reset_at, limit_window_seconds }, secondary_window? } }` —— 经 `~/.codex/auth.json` 的 OAuth 令牌读取 Codex 内部用量端点；按 `limit_window_seconds` 判别窗口（18000s≈5h → 滚动，604800s≈7天 → 周），字段缺失时按典型布局回退（primary = 5h 会话窗，secondary = 周池）。实验性接口 |
 
 ### 代理（部分供应商无法直连时）
 

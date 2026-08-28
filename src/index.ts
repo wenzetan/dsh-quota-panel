@@ -709,9 +709,14 @@ async function fetchChatGPTUsage(accessToken: string, accountId: string | undefi
 
 /**
  * Normalize a wham/usage response into the plugin's usage view.
- * primary_window is the weekly allowance; secondary_window (Pro plans)
- * is the shorter 5h window. We surface primary as `weekly` and, when
- * present, secondary as `rolling`, matching the coding-plan convention.
+ * The API names the windows primary/secondary, not 5h/weekly: on consumer
+ * plans primary_window carries the 5h session window and secondary_window
+ * the weekly pool, but the position is not a contract — every window also
+ * reports limit_window_seconds, which is what the official Codex TUI and
+ * CodexBar key on (5h = 18000s, weekly = 604800s, ±5% tolerance). We
+ * classify by duration and fall back to the typical positional layout
+ * (primary = 5h, secondary = weekly) only when the duration is missing
+ * or unrecognized (issue #7).
  */
 function parseChatGPTUsage(body: any): { kind: 'usage'; windows: Record<string, any>; title: string } | null {
 	const rl = body?.rate_limit;
@@ -730,11 +735,40 @@ function parseChatGPTUsage(body: any): { kind: 'usage'; windows: Record<string, 
 			resetsAt: toIso(w.reset_at)
 		};
 	};
+	const windowLane = (seconds: unknown): 'rolling' | 'weekly' | null => {
+		const n = Number(seconds);
+		if (!Number.isFinite(n) || n <= 0) return null;
+		const near = (target: number) => n >= target * 0.95 && n <= target * 1.05;
+		if (near(5 * 3600)) return 'rolling';
+		if (near(7 * 24 * 3600)) return 'weekly';
+		return null;
+	};
+	const placed: Array<{ win: { percent: number; resetsAt?: string }; lane: 'rolling' | 'weekly' }> = [];
+	const place = (raw: any, fallback: 'rolling' | 'weekly') => {
+		const win = mapWindow(raw);
+		if (win) placed.push({ win, lane: windowLane(raw?.limit_window_seconds) ?? fallback });
+	};
+	place(rl.primary_window, 'rolling');
+	place(rl.secondary_window, 'weekly');
+	if (placed.length === 2 && placed[0].lane === placed[1].lane) {
+		// Both windows resolved to the same lane: when exactly one carried a
+		// recognizable duration that evidence wins and the other window takes
+		// the remaining lane; otherwise use the typical positional layout.
+		const knownPrimary = windowLane(rl.primary_window?.limit_window_seconds);
+		const knownSecondary = windowLane(rl.secondary_window?.limit_window_seconds);
+		if (knownPrimary && !knownSecondary) {
+			placed[0].lane = knownPrimary;
+			placed[1].lane = knownPrimary === 'rolling' ? 'weekly' : 'rolling';
+		} else if (knownSecondary && !knownPrimary) {
+			placed[1].lane = knownSecondary;
+			placed[0].lane = knownSecondary === 'rolling' ? 'weekly' : 'rolling';
+		} else {
+			placed[0].lane = 'rolling';
+			placed[1].lane = 'weekly';
+		}
+	}
 	const windows: Record<string, any> = {};
-	const primary = mapWindow(rl.primary_window);
-	if (primary) windows.weekly = primary;
-	const secondary = mapWindow(rl.secondary_window);
-	if (secondary) windows.rolling = secondary;
+	for (const { win, lane } of placed) windows[lane] = win;
 	if (Object.keys(windows).length === 0) return null;
 	const plan = typeof body?.plan_type === 'string' && body.plan_type ? body.plan_type : 'subscription';
 	const titleParts = [
