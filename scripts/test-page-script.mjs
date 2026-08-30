@@ -1129,6 +1129,8 @@ check('B: renderer returns element', element && typeof element.type === 'functio
 	// instead; the overlay lift stays.
 	check('B: capsule default bottom stays 18px (drag replaces the offset)', /#dsh-quota-panel\{[^}]*bottom:18px/.test(clientSource));
 	check('B: overlay layer lift rule injected (z-index 1150 over body panels)', clientSource.includes('[class*="overlayLayer"]{z-index:1150 !important;}'));
+	check('B: settings card stays within viewport and scrolls internally', /#dsh-quota-card\{[^}]*max-height:calc\(100vh - 36px\)[^}]*overflow-y:auto/.test(clientSource));
+	check('B: settings header stays visible while the card scrolls', /#dsh-quota-card \.dsh-quota-header\{[^}]*position:sticky[^}]*top:-14px/.test(clientSource));
 	// Drag: pointer capture + move threshold (click-to-expand intact),
 	// position clamped into the viewport and persisted with the other
 	// settings; reset clears it.
