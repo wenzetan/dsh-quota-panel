@@ -784,6 +784,70 @@ check('A: zai unknown units -> nearer reset becomes rolling', (() => {
 	const w = q2.value.rows.find((r) => r.id === 'zai-coding-cn')?.view?.windows;
 	return w?.rolling?.percent === 30 && w?.weekly?.percent === 90;
 })());
+// ---------- A2e2: credit-package plans (issue #7, zai) ----------
+// Some GLM subscriptions answer the same endpoint with CREDIT_LIMIT rows
+// (a short daily pool + a weekly pool, each carrying a ready-made
+// percentage) instead of TOKENS_LIMIT/TIME_LIMIT windows — the adapter
+// used to reject those payloads with "no TOKENS_LIMIT / TIME_LIMIT
+// entries" and the row died. Map them onto rolling/weekly by reset order
+// and surface the raw remaining/package counts in the hover title.
+let q5, q6, q7;
+globalThis.fetch = async (url) => {
+	const s = String(url);
+	if (s.includes('bigmodel') || s.includes('api.z.ai')) {
+		// issue #7 payload (reporter's live response): credit rows only;
+		// the nearer reset is the daily pool, the farther one weekly.
+		return { ok: true, status: 200, json: async () => ({ code: 200, data: { limits: [
+			{ type: 'CREDIT_LIMIT', remaining: 1970, number: 5, percentage: 1, nextResetTime: 1893456000000 },
+			{ type: 'CREDIT_LIMIT', remaining: 7755, number: 1, percentage: 22, nextResetTime: 1894059060000 }
+		] } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { q5 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: zai credit-only -> nearer reset rolling, farther weekly', (() => {
+	const row = q5.value.rows.find((r) => r.id === 'zai-coding-cn');
+	const w = row?.view?.windows;
+	return row?.view?.kind === 'usage' && !row?.error
+		&& w?.rolling?.percent === 1 && w?.weekly?.percent === 22
+		&& typeof w?.rolling?.resetsAt === 'string';
+})());
+check('A: zai credit rows tag the title with remaining counts', (() => {
+	const title = q5.value.rows.find((r) => r.id === 'zai-coding-cn')?.view?.title;
+	return /CREDIT_LIMIT/.test(title) && /1970\/5/.test(title) && /7755\/1/.test(title);
+})());
+globalThis.fetch = async (url) => {
+	const s = String(url);
+	if (s.includes('bigmodel') || s.includes('api.z.ai')) {
+		// token rows present alongside credit rows -> token windows win
+		return { ok: true, status: 200, json: async () => ({ code: 200, data: { limits: [
+			{ type: 'CREDIT_LIMIT', remaining: 1970, number: 5, percentage: 1, nextResetTime: 1893456000000 },
+			{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 64, nextResetTime: 1893456060000 },
+			{ type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 12, nextResetTime: 1894059060000 }
+		] } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { q6 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: zai token rows still win when both kinds present', (() => {
+	const w = q6.value.rows.find((r) => r.id === 'zai-coding-cn')?.view?.windows;
+	return w?.rolling?.percent === 64 && w?.weekly?.percent === 12;
+})());
+globalThis.fetch = async (url) => {
+	const s = String(url);
+	if (s.includes('bigmodel') || s.includes('api.z.ai')) {
+		// a single credit pool -> rolling lane only, no fabricated weekly
+		return { ok: true, status: 200, json: async () => ({ code: 200, data: { limits: [
+			{ type: 'CREDIT_LIMIT', remaining: 7755, number: 1, percentage: 22, nextResetTime: 1894059060000 }
+		] } }) };
+	}
+	return { ok: false, status: 404, json: async () => ({}) };
+};
+try { q7 = await handler('fetch-all', null, undefined); } finally { globalThis.fetch = realFetch; }
+check('A: zai single credit row -> rolling only', (() => {
+	const w = q7.value.rows.find((r) => r.id === 'zai-coding-cn')?.view?.windows;
+	return w?.rolling?.percent === 22 && w?.weekly === undefined;
+})());
 globalThis.fetch = async (url) => {
 	if (String(url).includes('api.kimi.com')) {
 		// glm-plan-usage2 shape: weekly window FIRST, no `used`, no top-level usage
