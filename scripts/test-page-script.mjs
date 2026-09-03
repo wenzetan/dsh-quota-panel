@@ -251,10 +251,15 @@ check('A: zhipu quota percentage fallback', (() => {
 })());
 
 // ---------- A2c: Volcengine Ark (AK/SK signed OpenAPI) ----------
-// Volcengine requires BOTH refs to resolve before the row is discovered;
-// fetchRow calls GetAFPUsage first and falls back to GetCodingPlanUsage.
-// The signed POST goes through globalThis.fetch with the query in the URL,
-// so the test harness can stub by URL substring without caring about headers.
+// Volcengine ships TWO separate subscriptions shown as two independent rows
+// that share the same AK/SK pair:
+//   volcengine-agent  -> GetAFPUsage       (Agent Plan: 5h/weekly/monthly)
+//   volcengine-coding -> GetCodingPlanUsage (Coding Plan: session/weekly/monthly)
+// Each row queries ONLY its own action — no fallback between the two, so a
+// plan the account has not subscribed to reports an inline "not subscribed"
+// message rather than showing the other plan's numbers. The signed POST goes
+// through globalThis.fetch with the query in the URL, so the harness stubs by
+// URL substring without caring about headers.
 let veHandler;
 let veCalls = [];
 let veInits = [];
@@ -265,6 +270,7 @@ const veJson = (obj, ok = true, status = 200) => ({
 	status,
 	arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(obj)).buffer
 });
+// Both plans subscribed: GetAFPUsage returns Agent Plan windows, GetCodingPlanUsage returns Coding Plan.
 globalThis.fetch = async (url, init) => {
 	veCalls.push(String(url));
 	veInits.push(init);
@@ -279,39 +285,69 @@ globalThis.fetch = async (url, init) => {
 			AFPDaily:    { Quota: 50000, Used: 0, ResetTime: 1787241600000 }
 		} });
 	}
+	if (s.includes('Action=GetCodingPlanUsage')) {
+		return veJson({ ResponseMetadata: {}, Result: {
+			Status: 'Running',
+			QuotaUsage: [
+				{ Level: 'session', Percent: 19, ResetTimestamp: 1787167230 },
+				{ Level: 'weekly', Percent: 74, ResetTimestamp: 1787500800 },
+				{ Level: 'monthly', Percent: 26, ResetTimestamp: 1789833599 }
+			]
+		} });
+	}
 	return veJson({ ResponseMetadata: { RequestId: 't' }, Result: {} });
 };
 try {
-	// AK-only -> row must NOT appear (needs both credentials)
+	// AK-only -> neither row may appear (each needs both credentials)
 	credentialMap = { VOLC_ACCESS_KEY: 'AKLTtest' };
 	veHandler = mount({});
 	const specAkOnly = await veHandler('specs', null, undefined);
-	check('A: volcengine hidden when only AK is configured', !specAkOnly.value.rows.some((r) => r.id === 'volcengine'));
+	check('A: volcengine rows hidden when only AK is configured', !specAkOnly.value.rows.some((r) => r.id === 'volcengine-agent' || r.id === 'volcengine-coding'));
 
-	// Both AK + SK -> row discovered, kind usage
+	// Both AK + SK -> BOTH rows discovered, each kind usage with own labels
 	credentialMap = { VOLC_ACCESS_KEY: 'AKLTtest', VOLC_SECRET_KEY: 'secretkey' };
 	veHandler = mount({});
 	const specBoth = await veHandler('specs', null, undefined);
-	const veSpec = specBoth.value.rows.find((r) => r.id === 'volcengine');
-	check('A: volcengine discovered when both AK and SK resolve', !!veSpec && veSpec.kind === 'usage' && veSpec.windowLabels?.rolling === '5h');
+	const agentSpec = specBoth.value.rows.find((r) => r.id === 'volcengine-agent');
+	const codingSpec = specBoth.value.rows.find((r) => r.id === 'volcengine-coding');
+	check('A: volcengine two rows discovered (agent + coding)', (() => {
+		return agentSpec?.kind === 'usage' && agentSpec.windowLabels?.rolling === '5h'
+			&& codingSpec?.kind === 'usage' && codingSpec.windowLabels?.rolling === '会话';
+	})());
 
-	// fetch-all -> GetAFPUsage response normalizes to 5h/weekly/monthly; AFPDaily skipped
+	// fetch-all: agent row parses GetAFPUsage; coding row parses GetCodingPlanUsage
 	veCalls = [];
 	veInits = [];
 	const veFetch = await veHandler('fetch-all', null, undefined);
-	const veRow = veFetch.value.rows.find((r) => r.id === 'volcengine');
-	check('A: volcengine Agent Plan -> 3 windows (AFPDaily skipped)', (() => {
-		const w = veRow?.view?.windows;
-		return veRow?.view?.kind === 'usage'
+	const agentRow = veFetch.value.rows.find((r) => r.id === 'volcengine-agent');
+	const codingRow = veFetch.value.rows.find((r) => r.id === 'volcengine-coding');
+	check('A: volcengine agent row -> Agent Plan 3 windows (AFPDaily skipped)', (() => {
+		const w = agentRow?.view?.windows;
+		return agentRow?.view?.kind === 'usage'
 			&& w?.rolling?.percent === 65
 			&& w?.weekly?.percent === 20
 			&& w?.monthly?.percent === 6
 			&& w?.daily === undefined
-			&& typeof w?.rolling?.resetsAt === 'string';
+			&& typeof w?.rolling?.resetsAt === 'string'
+			&& /Agent Plan/.test(agentRow?.view?.title ?? '');
 	})());
-	check('A: volcengine calls the signed OpenAPI with Action= and Region= in query', veCalls.some((u) => u.includes('Action=GetAFPUsage') && u.includes('Region=cn-beijing') && u.startsWith('https://open.volcengineapi.com/')));
+	check('A: volcengine coding row -> Coding Plan session/weekly/monthly', (() => {
+		const w = codingRow?.view?.windows;
+		return codingRow?.view?.kind === 'usage'
+			&& w?.rolling?.percent === 19
+			&& w?.weekly?.percent === 74
+			&& w?.monthly?.percent === 26
+			&& /Coding Plan/.test(codingRow?.view?.title ?? '');
+	})());
+	// No cross-fallback: each action is called exactly once and every call
+	// carries Region=cn-beijing on the OpenAPI host.
+	check('A: volcengine each row calls its own action only (no cross-fallback)',
+		veCalls.filter((u) => u.includes('Action=GetAFPUsage')).length === 1
+		&& veCalls.filter((u) => u.includes('Action=GetCodingPlanUsage')).length === 1
+		&& veCalls.every((u) => u.includes('Region=cn-beijing') && u.startsWith('https://open.volcengineapi.com/'))
+	);
 	check('A: volcengine request uses POST (not GET) with Authorization header', (() => {
-		const i = veCalls.findIndex((u) => u.includes('Action=GetAFPUsage'));
+		const i = veInits.findIndex((init) => init?.headers?.Authorization);
 		const init = i >= 0 ? veInits[i] : null;
 		return init?.method === 'POST'
 			&& typeof init?.headers?.Authorization === 'string'
@@ -322,14 +358,13 @@ try {
 	globalThis.fetch = realFetch;
 }
 
-// Volcengine: Coding Plan fallback when AFP returns no usable windows
-let veCpCalls = [];
+// Volcengine: only Coding Plan subscribed (Agent Plan returns no windows).
+// The agent row must report "not subscribed" and NOT fall back to Coding Plan.
 globalThis.fetch = async (url) => {
-	veCpCalls.push(String(url));
 	const s = String(url);
 	if (!s.includes('open.volcengineapi.com')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
 	if (s.includes('Action=GetAFPUsage')) {
-		// subscribed=false equivalent: empty Result (no quota fields)
+		// not subscribed: empty Result (PlanType present but no quota fields)
 		return veJson({ ResponseMetadata: {}, Result: { PlanType: 'medium' } });
 	}
 	if (s.includes('Action=GetCodingPlanUsage')) {
@@ -348,21 +383,24 @@ try {
 	credentialMap = { VOLC_ACCESS_KEY: 'AKLTtest', VOLC_SECRET_KEY: 'secretkey' };
 	const cpHandler = mount({});
 	const cpFetch = await cpHandler('fetch-all', null, undefined);
-	const cpRow = cpFetch.value.rows.find((r) => r.id === 'volcengine');
-	check('A: volcengine Coding Plan fallback parses session/weekly/monthly', (() => {
-		const w = cpRow?.view?.windows;
-		return cpRow?.view?.kind === 'usage'
+	const agentRow = cpFetch.value.rows.find((r) => r.id === 'volcengine-agent');
+	const codingRow = cpFetch.value.rows.find((r) => r.id === 'volcengine-coding');
+	check('A: volcengine agent row not-subscribed -> inline error, no Coding Plan fallback',
+		!!agentRow?.error && /Agent Plan/.test(agentRow.error) && agentRow.view === undefined
+	);
+	check('A: volcengine coding row still parses when agent is absent', (() => {
+		const w = codingRow?.view?.windows;
+		return codingRow?.view?.kind === 'usage'
 			&& w?.rolling?.percent === 0
 			&& w?.weekly?.percent === 2
 			&& w?.monthly?.percent === 1
 			&& w?.rolling?.resetsAt === undefined; // ResetTimestamp=-1 -> no reset
 	})());
-	check('A: volcengine fallback ordered GetAFPUsage then GetCodingPlanUsage', veCpCalls.filter((u) => u.includes('Action=GetAFPUsage')).length === 1 && veCpCalls.filter((u) => u.includes('Action=GetCodingPlanUsage')).length === 1 && veCpCalls.findIndex((u) => u.includes('GetAFPUsage')) < veCpCalls.findIndex((u) => u.includes('GetCodingPlanUsage')));
 } finally {
 	globalThis.fetch = realFetch;
 }
 
-// Volcengine: AK/SK auth error surfaces as per-row error (not throw)
+// Volcengine: AK/SK auth error surfaces as a per-row error on BOTH rows (not throw)
 globalThis.fetch = async (url) => {
 	if (String(url).includes('open.volcengineapi.com')) {
 		return veJson({ ResponseMetadata: { Error: { Code: 'SignatureDoesNotMatch', Message: 'bad secret' } } });
@@ -373,8 +411,12 @@ try {
 	credentialMap = { VOLC_ACCESS_KEY: 'AKLTbad', VOLC_SECRET_KEY: 'bad' };
 	const errHandler = mount({});
 	const errFetch = await errHandler('fetch-all', null, undefined);
-	const errRow = errFetch.value.rows.find((r) => r.id === 'volcengine');
-	check('A: volcengine auth error surfaces as per-row error with upstream code', !!errRow?.error && /SignatureDoesNotMatch/.test(errRow.error) && errRow.view === undefined);
+	const agentErr = errFetch.value.rows.find((r) => r.id === 'volcengine-agent');
+	const codingErr = errFetch.value.rows.find((r) => r.id === 'volcengine-coding');
+	check('A: volcengine auth error surfaces as per-row error on both rows with upstream code',
+		!!agentErr?.error && /SignatureDoesNotMatch/.test(agentErr.error) && agentErr.view === undefined
+		&& !!codingErr?.error && /SignatureDoesNotMatch/.test(codingErr.error) && codingErr.view === undefined
+	);
 } finally {
 	globalThis.fetch = realFetch;
 }
@@ -389,7 +431,8 @@ try {
 	let capturedAuth = null;
 	globalThis.fetch = async (url, init) => {
 		if (String(url).includes('open.volcengineapi.com')) {
-			capturedAuth = init?.headers?.Authorization ?? null;
+			// Agent row signs GetAFPUsage; capture that signature specifically.
+			if (String(url).includes('Action=GetAFPUsage')) capturedAuth = init?.headers?.Authorization ?? null;
 			return veJson({ ResponseMetadata: {}, Result: { AFPFiveHour: { Quota: 10, Used: 1 } } });
 		}
 		return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
@@ -413,7 +456,7 @@ try {
 	}
 }
 
-// Volcengine: response bodies above the 1 MiB ceiling are refused
+// Volcengine: response bodies above the 1 MiB ceiling are refused (both rows)
 {
 	globalThis.fetch = async (url) => {
 		if (String(url).includes('open.volcengineapi.com')) {
@@ -425,8 +468,12 @@ try {
 		credentialMap = { VOLC_ACCESS_KEY: 'AKLTtest', VOLC_SECRET_KEY: 'secretkey' };
 		const bigHandler = mount({});
 		const bigFetch = await bigHandler('fetch-all', null, undefined);
-		const bigRow = bigFetch.value.rows.find((r) => r.id === 'volcengine');
-		check('A: volcengine oversized body (>1 MiB) refused with per-row error', !!bigRow?.error && /exceeds/.test(bigRow.error) && bigRow.view === undefined);
+		const agentBig = bigFetch.value.rows.find((r) => r.id === 'volcengine-agent');
+		const codingBig = bigFetch.value.rows.find((r) => r.id === 'volcengine-coding');
+		check('A: volcengine oversized body (>1 MiB) refused on both rows',
+			!!agentBig?.error && /exceeds/.test(agentBig.error) && agentBig.view === undefined
+			&& !!codingBig?.error && /exceeds/.test(codingBig.error) && codingBig.view === undefined
+		);
 	} finally {
 		globalThis.fetch = realFetch;
 	}
