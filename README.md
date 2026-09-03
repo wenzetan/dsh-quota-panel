@@ -318,7 +318,7 @@ After restart, check the panel:
   pay-as-you-go accounts; the two rows report independently — hide the
   unsubscribed one from the ⚙ settings panel).
 
-> **Migration (from ≤ 0.9.1-rc.3, if you pinned the old row):** the single
+> **Migration (from ≤ 0.9.1, if you pinned the old row):** the single
 > catalog row id `volcengine` and the format id `volcengine-usage` were
 > replaced by `volcengine-agent` (`volcengine-agent-usage`) and
 > `volcengine-coding` (`volcengine-coding-usage`). Auto-discovered setups need
@@ -604,7 +604,7 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
-- **v0.9.1-rc.4** — Volcengine Ark Agent Plan and Coding Plan are now **shown as
+- **v0.9.2-rc.1** — Volcengine Ark Agent Plan and Coding Plan are now **shown as
   two rows at once** (previously a single row queried Agent Plan first and fell
   back to Coding Plan). The two subscriptions render as two independent
   providers sharing the same AK/SK pair: the Agent row (`volcengine-agent`,

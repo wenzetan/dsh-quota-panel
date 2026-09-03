@@ -248,7 +248,7 @@ VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - 显示 `volcengine AccessDenied: ...` → 策略没挂上或挂错了来源；
 - 显示 `No active Volcengine Ark Agent/Coding Plan subscription` → 签名通过但该账号没有订阅对应套餐（按量付费账号就会这样；两行各自独立提示，可在 ⚙ 设置里隐藏未订阅的那一行）。
 
-> **迁移说明（≤ 0.9.1-rc.3，仅影响手动固定过旧行的用户）：** 原来的单一目录行 id
+> **迁移说明（≤ 0.9.1，仅影响手动固定过旧行的用户）：** 原来的单一目录行 id
 > `volcengine` 与 format id `volcengine-usage` 已被替换为 `volcengine-agent`
 > （`volcengine-agent-usage`）与 `volcengine-coding`（`volcengine-coding-usage`）。
 > 走自动发现的用户无需任何改动；若你的配置里手写过引用旧 id 的 `catalog:` 覆盖或
@@ -496,7 +496,7 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
-- **v0.9.1-rc.4** —— 火山方舟 Agent Plan 与 Coding Plan **拆成两行同时显示**（此前是「先查 Agent Plan、无数据才回落 Coding Plan」的单行二选一）。两个套餐现在像两个独立供应商一样各自一行、共享同一对 AK/SK：Agent 行（`volcengine-agent`，`GetAFPUsage`，5h/周/月）与 Coding 行（`volcengine-coding`，`GetCodingPlanUsage`，会话/周/月）分别只查自己的接口、互不回落，未订阅的套餐显示独立的「未订阅」提示。Coding 行悬停标题的滚动窗口改标为 `session:`（会话限额而非 5h 窗口），并在火山排错段补充了旧行 id（`volcengine` / `volcengine-usage`）的迁移说明。
+- **v0.9.2-rc.1** —— 火山方舟 Agent Plan 与 Coding Plan **拆成两行同时显示**（此前是「先查 Agent Plan、无数据才回落 Coding Plan」的单行二选一）。两个套餐现在像两个独立供应商一样各自一行、共享同一对 AK/SK：Agent 行（`volcengine-agent`，`GetAFPUsage`，5h/周/月）与 Coding 行（`volcengine-coding`，`GetCodingPlanUsage`，会话/周/月）分别只查自己的接口、互不回落，未订阅的套餐显示独立的「未订阅」提示。Coding 行悬停标题的滚动窗口改标为 `session:`（会话限额而非 5h 窗口），并在火山排错段补充了旧行 id（`volcengine` / `volcengine-usage`）的迁移说明。
 - **v0.8.1-rc.6** —— issue #1 布局修复（重构版）：面板现在**可拖动**——抓住收起态
   胶囊或展开卡片头部即可拖到任意位置（指针捕获；5px 移动阈值，轻微晃动不影
   响点击展开；始终钳位在视口内，不会拖丢；位置与其他设置一并持久化到
