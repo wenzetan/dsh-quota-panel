@@ -1565,7 +1565,7 @@ function parseVolcengineCodingPlan(result: any): { kind: 'usage'; windows: Recor
 	}
 	if (Object.keys(windows).length === 0) return null;
 	const title = [
-		`5h: ${windows.rolling?.percent ?? '—'}%`,
+		`session: ${windows.rolling?.percent ?? '—'}%`,
 		`weekly: ${windows.weekly?.percent ?? '—'}%`,
 		`monthly: ${windows.monthly?.percent ?? '—'}%`
 	].join('\n');

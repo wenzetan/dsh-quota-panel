@@ -318,6 +318,14 @@ After restart, check the panel:
   pay-as-you-go accounts; the two rows report independently — hide the
   unsubscribed one from the ⚙ settings panel).
 
+> **Migration (from ≤ 0.9.1-rc.3, if you pinned the old row):** the single
+> catalog row id `volcengine` and the format id `volcengine-usage` were
+> replaced by `volcengine-agent` (`volcengine-agent-usage`) and
+> `volcengine-coding` (`volcengine-coding-usage`). Auto-discovered setups need
+> no changes; a hand-written `catalog:` override or `providers:` entry that
+> still references the old ids makes the plugin refuse to load with a
+> validation error listing the valid ids — update it to the two new ids.
+
 > Security note: an AK/SK pair can read all Ark usage data for the account.
 > Redact it before pasting into chats, tickets, or screenshots, and rotate it
 > from the [key management page](https://console.volcengine.com/iam/keymanage)
@@ -596,14 +604,17 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
-- **Unreleased** — Volcengine Ark Agent Plan and Coding Plan are now **shown as
+- **v0.9.1-rc.4** — Volcengine Ark Agent Plan and Coding Plan are now **shown as
   two rows at once** (previously a single row queried Agent Plan first and fell
   back to Coding Plan). The two subscriptions render as two independent
   providers sharing the same AK/SK pair: the Agent row (`volcengine-agent`,
   `GetAFPUsage`, 5h/weekly/monthly) and the Coding row (`volcengine-coding`,
   `GetCodingPlanUsage`, session/weekly/monthly) each query only their own API
   with no cross-fallback; a plan the account has not subscribed to reports its
-  own "not subscribed" message on that row.
+  own "not subscribed" message on that row. The Coding row's hover title labels
+  its rolling window `session:` (it is a session limit, not a 5h window), and a
+  migration note for the replaced row/format ids (`volcengine` /
+  `volcengine-usage`) was added to the Volcengine troubleshooting section.
 - **v0.8.1-rc.6** — layout fixes from issue #1, reworked: the panel is now
   **draggable** — grab the collapsed capsule or the expanded card header and
   move it anywhere (pointer capture, 5px move threshold so click-to-expand
