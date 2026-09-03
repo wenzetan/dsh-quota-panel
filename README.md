@@ -215,11 +215,11 @@ Explicit `providers` fields:
 | `id` | row id (RPC rows align by id), `^[a-z0-9-]+$` | required |
 | `label` | provider name shown on the card | required |
 | `credential` | credential reference (`$DSH_HOME/.credentials.yaml` or environment) | required |
-| `secretCredential` | second credential reference (Volcengine `volcengine-usage`: the SK) | — |
+| `secretCredential` | second credential reference (Volcengine `volcengine-agent-usage` / `volcengine-coding-usage`: the SK) | — |
 | `endpoint` | quota JSON endpoint; base URL for `openai-billing` | required |
 | `format` | row adapter (see table below) | `deepseek-balance` |
 | `proxy` | a proxy name defined in `proxies`; absent = direct | — |
-| `region` | (`volcengine-usage`) Volcengine OpenAPI region | `cn-beijing` |
+| `region` | (`volcengine-agent-usage` / `volcengine-coding-usage`) Volcengine OpenAPI region | `cn-beijing` |
 | `currency` | (balance rows) currency symbol, overrides the format default | format default |
 | `balanceTiers` | (balance rows) `{critical, warn, healthy}` | `{10, 20, 50}` |
 | `lowBalance` | legacy alias for `balanceTiers.warn` | — |
@@ -244,9 +244,15 @@ Explicit `providers` fields:
 | Z.AI GLM Coding | `ZAI_API_KEY` | `api.z.ai/api/monitor/usage/quota/limit` | coding-plan windows (5h tokens / weekly / searches) |
 | Kimi Coding | `KIMI_API_KEY` | `api.kimi.com/coding/v1/usages` | usage % (5h rate limit + weekly request pool) |
 | OpenCode Go | `OPENCODE_GO_API_KEY` | `opencode.ai/zen/go/v1/usage` | three-window usage % |
-| Volcengine Ark (火山方舟) | `VOLC_ACCESS_KEY` + `VOLC_SECRET_KEY` | `open.volcengineapi.com` (OpenAPI, signed) | usage % (Agent Plan 5h/weekly/monthly; falls back to Coding Plan) |
+| Volcengine Ark Agent Plan | `VOLC_ACCESS_KEY` + `VOLC_SECRET_KEY` | `open.volcengineapi.com` (OpenAPI, signed) | usage % (5h / weekly / monthly, `GetAFPUsage`) |
+| Volcengine Ark Coding Plan | `VOLC_ACCESS_KEY` + `VOLC_SECRET_KEY` | `open.volcengineapi.com` (OpenAPI, signed) | usage % (session / weekly / monthly, `GetCodingPlanUsage`) |
 
-> Volcengine Ark authenticates with an **AccessKey ID / SecretAccessKey pair** using
+> Volcengine Ark has **two separate subscriptions — Agent Plan and Coding Plan** —
+> shown as **two independent rows** (like two providers) that share the same
+> AK/SK pair. Each row queries only its own plan's API and never falls back to
+> the other, so a plan the account has not subscribed to shows a "not
+> subscribed" message on that row instead of the other plan's numbers.
+> Volcengine authenticates with an **AccessKey ID / SecretAccessKey pair** using
 > HMAC-SHA256 request signing — not a Bearer token. The inference `ARK_API_KEY`
 > (shaped `ark-...`) cannot query usage; only the AK/SK pair has OpenAPI
 > permission. Full setup is in the next section.
@@ -291,22 +297,34 @@ VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 You can also use the `VOLC_ACCESS_KEY` / `VOLC_SECRET_KEY` environment
 variables (DSH's credential resolver falls back to the environment). Restart
-`dsh web`; the "Volcengine Ark" row appears in the bottom-right panel
-automatically — no `providers:` block required.
+`dsh web`; the "Volcengine Agent" and "Volcengine Coding" rows appear in the
+bottom-right panel automatically (whichever plan the account subscribes to
+shows data; both rows share the same AK/SK pair) — no `providers:` block required.
 
 **Verifying permissions**
 
 After restart, check the panel:
 
-- Three percentages (5h / weekly / monthly) render → AK/SK and
-  `ArkReadOnlyAccess` are both working;
+- The Agent row shows three percentages (5h / weekly / monthly) and the Coding
+  row shows three (session / weekly / monthly) → AK/SK and `ArkReadOnlyAccess`
+  are both working (if only one plan is subscribed, the other row shows a
+  "not subscribed" message);
 - `volcengine SignatureDoesNotMatch: ...` → the SK was copied wrong (watch the
   trailing `=`);
 - `volcengine AccessDenied: ...` → the policy is not attached or the wrong
   source policy was selected;
-- `No active Agent Plan or Coding Plan subscription` → the signature worked
-  but the account has no Agent/Coding Plan subscription (typical for pay-as-you-go
-  accounts; hide the row from the ⚙ settings panel).
+- `No active Volcengine Ark Agent/Coding Plan subscription` → the signature
+  worked but the account has no subscription to that plan (typical for
+  pay-as-you-go accounts; the two rows report independently — hide the
+  unsubscribed one from the ⚙ settings panel).
+
+> **Migration (from ≤ 0.9.1-rc.3, if you pinned the old row):** the single
+> catalog row id `volcengine` and the format id `volcengine-usage` were
+> replaced by `volcengine-agent` (`volcengine-agent-usage`) and
+> `volcengine-coding` (`volcengine-coding-usage`). Auto-discovered setups need
+> no changes; a hand-written `catalog:` override or `providers:` entry that
+> still references the old ids makes the plugin refuse to load with a
+> validation error listing the valid ids — update it to the two new ids.
 
 > Security note: an AK/SK pair can read all Ark usage data for the account.
 > Redact it before pasting into chats, tickets, or screenshots, and rotate it
@@ -406,7 +424,8 @@ recover.
 | `opencode-usage` | usage % | `{ usage: { rolling|weekly|monthly: { percent, resetsAt } } }` |
 | `zai-coding-quota` | usage % | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT \| CREDIT_LIMIT, unit, number, percentage, currentValue, usage, remaining, nextResetTime }] } }` — semantic mapping (glm-plan-usage2, issue #2): TOKENS_LIMIT `unit=3` → 5h window, `unit=6` → weekly, TIME_LIMIT → MCP monthly lane; unknown units fall back to `nextResetTime` ordering; every window prefers the `percentage` field. Credit/resource-package plans (issue #7) return CREDIT_LIMIT rows instead of token windows: they map onto rolling/weekly by `nextResetTime` order, and the hover title tags them `[CREDIT_LIMIT left remaining/number]` |
 | `kimi-coding-usage` | usage % | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` — 5h = the `duration=300` window, weekly = `duration=10080` (fallback: top-level usage); used = limit − remaining |
-| `volcengine-usage` | usage % | Dispatched inline in `fetchRow` (not through `adaptRow`): signs and calls the Volcengine Ark OpenAPI `GetAFPUsage`, then falls back to `GetCodingPlanUsage`. Agent Plan parses `Result.AFPFiveHour / AFPWeekly / AFPMonthly` (AFPDaily skipped per the console). Coding Plan parses `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}` (percentages only). |
+| `volcengine-agent-usage` | usage % | Dispatched inline in `fetchRow` (not through `adaptRow`): signs and calls the Volcengine Ark OpenAPI `GetAFPUsage`, parsing `Result.AFPFiveHour / AFPWeekly / AFPMonthly` (Agent Plan 5h/weekly/monthly; AFPDaily skipped per the console). |
+| `volcengine-coding-usage` | usage % | Dispatched inline in `fetchRow` (not through `adaptRow`): signs and calls the Volcengine Ark OpenAPI `GetCodingPlanUsage`, parsing `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}` (Coding Plan session/weekly/monthly, percentages only). Independent from the Agent row — no fallback between them. |
 | `chatgpt-subscription` | usage % | `{ plan_type, rate_limit: { primary_window: { used_percent, reset_at, limit_window_seconds }, secondary_window? } }` — read via the OAuth token in `~/.codex/auth.json` against Codex's internal usage endpoint; windows are classified by `limit_window_seconds` (18000s ≈ 5h → rolling, 604800s ≈ 7d → weekly), falling back to the typical positional layout (primary = 5h session, secondary = weekly pool). Experimental |
 
 ### Proxy (providers that cannot be reached directly)
@@ -585,6 +604,17 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.9.1-rc.4** — Volcengine Ark Agent Plan and Coding Plan are now **shown as
+  two rows at once** (previously a single row queried Agent Plan first and fell
+  back to Coding Plan). The two subscriptions render as two independent
+  providers sharing the same AK/SK pair: the Agent row (`volcengine-agent`,
+  `GetAFPUsage`, 5h/weekly/monthly) and the Coding row (`volcengine-coding`,
+  `GetCodingPlanUsage`, session/weekly/monthly) each query only their own API
+  with no cross-fallback; a plan the account has not subscribed to reports its
+  own "not subscribed" message on that row. The Coding row's hover title labels
+  its rolling window `session:` (it is a session limit, not a 5h window), and a
+  migration note for the replaced row/format ids (`volcengine` /
+  `volcengine-usage`) was added to the Volcengine troubleshooting section.
 - **v0.8.1-rc.6** — layout fixes from issue #1, reworked: the panel is now
   **draggable** — grab the collapsed capsule or the expanded card header and
   move it anywhere (pointer capture, 5px move threshold so click-to-expand

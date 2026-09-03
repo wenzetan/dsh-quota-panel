@@ -176,11 +176,11 @@ credential 引用名，UPPER_SNAKE）/ `secretRefs`（第二凭据引用，火�
 | `id` | 行标识（RPC 行按 id 对齐），`^[a-z0-9-]+$` | 必填 |
 | `label` | 卡片上的提供方名称 | 必填 |
 | `credential` | 凭据引用（`$DSH_HOME/.credentials.yaml` 或环境变量） | 必填 |
-| `secretCredential` | 第二凭据引用（火山方舟 `volcengine-usage` 需要：SK） | — |
+| `secretCredential` | 第二凭据引用（火山方舟 `volcengine-agent-usage` / `volcengine-coding-usage` 需要：SK） | — |
 | `endpoint` | 额度 JSON 接口；`openai-billing` 格式时为聚合站 base URL | 必填 |
 | `format` | 行适配器（见下表） | `deepseek-balance` |
 | `proxy` | `proxies` 中定义的代理名；缺省直连 | — |
-| `region` | （`volcengine-usage`）OpenAPI 区域，默认 `cn-beijing` | `cn-beijing` |
+| `region` | （`volcengine-agent-usage` / `volcengine-coding-usage`）OpenAPI 区域，默认 `cn-beijing` | `cn-beijing` |
 | `currency` | （余额型）币种符号，覆盖 format 默认值 | format 默认 |
 | `balanceTiers` | （余额型）`{critical, warn, healthy}` 分级阈值 | `{10, 20, 50}` |
 | `lowBalance` | 旧版别名，等价于 `balanceTiers.warn` | — |
@@ -205,9 +205,10 @@ credential 引用名，UPPER_SNAKE）/ `secretRefs`（第二凭据引用，火�
 | Z.AI GLM Coding | `ZAI_API_KEY` | `api.z.ai/api/monitor/usage/quota/limit` | 套餐窗口（5h tokens / 周 / MCP 月度） |
 | Kimi Coding | `KIMI_API_KEY` | `api.kimi.com/coding/v1/usages` | 用量%（5h 限频 + 周请求池） |
 | OpenCode Go | `OPENCODE_GO_API_KEY` | `opencode.ai/zen/go/v1/usage` | 三窗口用量% |
-| 火山方舟（Volcengine Ark） | `VOLC_ACCESS_KEY` + `VOLC_SECRET_KEY` | `open.volcengineapi.com`（OpenAPI 签名） | 用量%（Agent Plan 5h/周/月；无则回落 Coding Plan） |
+| 火山方舟 Agent Plan | `VOLC_ACCESS_KEY` + `VOLC_SECRET_KEY` | `open.volcengineapi.com`（OpenAPI 签名） | 用量%（5h / 周 / 月，`GetAFPUsage`） |
+| 火山方舟 Coding Plan | `VOLC_ACCESS_KEY` + `VOLC_SECRET_KEY` | `open.volcengineapi.com`（OpenAPI 签名） | 用量%（会话 / 周 / 月，`GetCodingPlanUsage`） |
 
-> 火山方舟使用**两组凭据**（AccessKey ID + SecretAccessKey）做 HMAC-SHA256 签名，不是 Bearer Token；推理用的 `ARK_API_KEY`（形如 `ark-...`）不能用于此查询，只有 AK/SK 有 OpenAPI 权限。完整接入步骤见下一节。
+> 火山方舟有 **Agent Plan 和 Coding Plan 两个相互独立的套餐**，插件把它们作为**两行**同时显示（就像两个供应商），共享同一对 AK/SK：每行只查询自己的套餐接口，互不回落——未订阅的那个套餐会显示一行「未订阅」提示，而不是显示另一个套餐的数字。火山方舟使用**两组凭据**（AccessKey ID + SecretAccessKey）做 HMAC-SHA256 签名，不是 Bearer Token；推理用的 `ARK_API_KEY`（形如 `ark-...`）不能用于此查询，只有 AK/SK 有 OpenAPI 权限。完整接入步骤见下一节。
 
 #### 火山方舟（Volcengine Ark）接入教程
 
@@ -236,16 +237,23 @@ VOLC_ACCESS_KEY: AKLTxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 VOLC_SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-或者用环境变量 `VOLC_ACCESS_KEY` / `VOLC_SECRET_KEY`（DSH 凭据解析支持环境变量回退）。重启 `dsh web` 后，右下角面板会自动出现「Volcengine Ark」行，无需在插件配置里加 `providers:`。
+或者用环境变量 `VOLC_ACCESS_KEY` / `VOLC_SECRET_KEY`（DSH 凭据解析支持环境变量回退）。重启 `dsh web` 后，右下角面板会自动出现「Volcengine Agent」和「Volcengine Coding」两行（订阅了哪个套餐，哪一行就有数据；两行共享同一对 AK/SK），无需在插件配置里加 `providers:`。
 
 **怎么验证权限是否正确**
 
 重启后看面板：
 
-- 出现 5h / 周 / 月三条百分比 → AK/SK 与 `ArkReadOnlyAccess` 都生效；
+- Agent 行出现 5h / 周 / 月三条百分比、Coding 行出现会话 / 周 / 月三条 → AK/SK 与 `ArkReadOnlyAccess` 都生效（只订阅了其中一个套餐时，另一个套餐那一行会显示「未订阅」提示）；
 - 显示 `volcengine SignatureDoesNotMatch: ...` → SK 复制错了（注意尾部的 `=`）；
 - 显示 `volcengine AccessDenied: ...` → 策略没挂上或挂错了来源；
-- 显示 `No active Agent Plan or Coding Plan subscription` → 签名通过但该账号没有订阅 Agent/Coding Plan（按量付费账号就会这样，面板上可以在 ⚙ 设置里隐藏这一行）。
+- 显示 `No active Volcengine Ark Agent/Coding Plan subscription` → 签名通过但该账号没有订阅对应套餐（按量付费账号就会这样；两行各自独立提示，可在 ⚙ 设置里隐藏未订阅的那一行）。
+
+> **迁移说明（≤ 0.9.1-rc.3，仅影响手动固定过旧行的用户）：** 原来的单一目录行 id
+> `volcengine` 与 format id `volcengine-usage` 已被替换为 `volcengine-agent`
+> （`volcengine-agent-usage`）与 `volcengine-coding`（`volcengine-coding-usage`）。
+> 走自动发现的用户无需任何改动；若你的配置里手写过引用旧 id 的 `catalog:` 覆盖或
+> `providers:` 条目，插件会校验失败并拒绝加载（错误信息会列出全部合法 id）——
+> 把旧 id 改成两个新 id 即可。
 
 > 安全建议：AK/SK 一旦泄露他人可以读你方舟账号的所有用量数据，贴到聊天/工单/截图前先打码；不再用时去 [密钥管理页](https://console.volcengine.com/iam/keymanage) 禁用并轮换。
 | ChatGPT 订阅（Plus/Pro） | 插件内登录 或 `~/.codex/auth.json`（无需 API Key） | `chatgpt.com/backend-api/wham/usage` | 周用量%（Pro 含 5h 窗口） |
@@ -330,7 +338,8 @@ ChatGPT OAuth 令牌调用 Codex 同款的内部用量端点，把 Plus/Pro 套�
 | `opencode-usage` | 用量% | `{ usage: { rolling|weekly|monthly: { percent, resetsAt } } }` |
 | `zai-coding-quota` | 用量% | `{ code: 200, data: { limits: [{ type: TOKENS_LIMIT \| TIME_LIMIT \| CREDIT_LIMIT, unit, number, percentage, currentValue, usage, remaining, nextResetTime }] } }` —— 语义映射（glm-plan-usage2，issue #2）：TOKENS_LIMIT `unit=3` → 5h 窗口、`unit=6` → 周、TIME_LIMIT → MCP 月度车道；未知 unit 回退按 `nextResetTime` 排序；各窗口百分比优先取 `percentage` 字段。积分/资源包套餐（issue #7）返回的是 CREDIT_LIMIT 行而非 token 窗口：按 `nextResetTime` 顺序映射到 滚动/周 泳道，悬停标题以 `[CREDIT_LIMIT left 剩余/包数]` 标注 |
 | `kimi-coding-usage` | 用量% | `{ usage: { limit, used, remaining, resetTime }, limits: [{ window: { duration, timeUnit }, detail: { limit, used, remaining, resetTime } }] }` —— 5h = `duration=300` 的窗口、周 = `duration=10080`（缺失时回退顶层 usage）；used = limit − remaining |
-| `volcengine-usage` | 用量% | 不走 `adaptRow`：`fetchRow` 内部以 AK/SK HMAC-SHA256 签名调用火山引擎 OpenAPI `GetAFPUsage` → `GetCodingPlanUsage`（回落），解析 `Result.AFPFiveHour/AFPWeekly/AFPMonthly`（Agent Plan，AFPDaily 跳过）或 `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}`（Coding Plan，仅百分比） |
+| `volcengine-agent-usage` | 用量% | 不走 `adaptRow`：`fetchRow` 内部以 AK/SK HMAC-SHA256 签名调用火山引擎 OpenAPI `GetAFPUsage`，解析 `Result.AFPFiveHour/AFPWeekly/AFPMonthly`（Agent Plan 的 5h/周/月，AFPDaily 按控制台惯例跳过） |
+| `volcengine-coding-usage` | 用量% | 不走 `adaptRow`：`fetchRow` 内部以 AK/SK HMAC-SHA256 签名调用火山引擎 OpenAPI `GetCodingPlanUsage`，解析 `Result.QuotaUsage[].Level ∈ {session,weekly,monthly}`（Coding Plan 的会话/周/月，仅百分比）。与 Agent 行相互独立、互不回落 |
 | `chatgpt-subscription` | 用量% | `{ plan_type, rate_limit: { primary_window: { used_percent, reset_at, limit_window_seconds }, secondary_window? } }` —— 经 `~/.codex/auth.json` 的 OAuth 令牌读取 Codex 内部用量端点；按 `limit_window_seconds` 判别窗口（18000s≈5h → 滚动，604800s≈7天 → 周），字段缺失时按典型布局回退（primary = 5h 会话窗，secondary = 周池）。实验性接口 |
 
 ### 代理（部分供应商无法直连时）
@@ -487,6 +496,7 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.9.1-rc.4** —— 火山方舟 Agent Plan 与 Coding Plan **拆成两行同时显示**（此前是「先查 Agent Plan、无数据才回落 Coding Plan」的单行二选一）。两个套餐现在像两个独立供应商一样各自一行、共享同一对 AK/SK：Agent 行（`volcengine-agent`，`GetAFPUsage`，5h/周/月）与 Coding 行（`volcengine-coding`，`GetCodingPlanUsage`，会话/周/月）分别只查自己的接口、互不回落，未订阅的套餐显示独立的「未订阅」提示。Coding 行悬停标题的滚动窗口改标为 `session:`（会话限额而非 5h 窗口），并在火山排错段补充了旧行 id（`volcengine` / `volcengine-usage`）的迁移说明。
 - **v0.8.1-rc.6** —— issue #1 布局修复（重构版）：面板现在**可拖动**——抓住收起态
   胶囊或展开卡片头部即可拖到任意位置（指针捕获；5px 移动阈值，轻微晃动不影
   响点击展开；始终钳位在视口内，不会拖丢；位置与其他设置一并持久化到
