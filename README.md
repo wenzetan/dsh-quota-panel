@@ -191,6 +191,10 @@ an API-key endpoint.
   `createElement`/`textContent`; API values never touch `innerHTML`;
   technical errors (401, timeout, missing credential, refused proxy) surface
   only in `title` tooltips or inline row text.
+- **A broken proxy can never take the host down** — every socket and request
+  the proxy engine opens funnels its `error` event into the row's result, so an
+  unreachable proxy (e.g. clash stopped, `ECONNREFUSED 127.0.0.1:7890`) shows
+  as a per-row error instead of an unhandled EventEmitter error.
 
 ## Configuration
 
@@ -613,6 +617,12 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.9.2-rc.3** — Fixes a host crash in the proxy engine: the CONNECT tunnel
+  request had no `error` listener, so an unreachable proxy
+  (`ECONNREFUSED 127.0.0.1:7890` — proxy not running) surfaced as Node's
+  `Emitted 'error' event on ClientRequest instance` and killed `dsh web`. Every
+  socket and request now funnels `error` into the row result, so a dead proxy
+  degrades to a per-row message.
 - **v0.9.2-rc.2** — Restores the host half on `@deepseek-ai/dsh@0.1.5-rc.1` and
   newer. `connection.rpc.handle()` no longer works for third-party plugins
   there: its route disposer reads `owner.webServer`, and that owner resolves to

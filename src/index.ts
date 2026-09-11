@@ -1363,7 +1363,11 @@ function proxiedGetJson(targetUrl: string, proxyUrl: string, headers: Record<str
 		const sock = proxyTls
 			? tls.connect({ host: proxy.hostname, port: proxyPort, servername: proxy.hostname })
 			: net.connect({ host: proxy.hostname, port: proxyPort });
-		sock.once('error', fail);
+		// Persistent handlers, not `once`: the same failure reaches several
+		// emitters (the socket AND the request Node re-emits it on), and a lone
+		// unhandled 'error' on any ClientRequest/socket kills the host process.
+		// `fail` is idempotent, so extra calls are no-ops.
+		sock.on('error', fail);
 		const readResponse = (req) => {
 			req.once('response', (res) => {
 				const chunks = [];
@@ -1382,9 +1386,9 @@ function proxiedGetJson(targetUrl: string, proxyUrl: string, headers: Record<str
 					status: res.statusCode,
 					json: async () => JSON.parse(Buffer.concat(chunks).toString('utf8'))
 				})));
-				res.once('error', fail);
+				res.on('error', fail);
 			});
-			req.once('error', fail);
+			req.on('error', fail);
 			req.end(body);
 		};
 		if (target.protocol === 'https:') {
@@ -1404,7 +1408,7 @@ function proxiedGetJson(targetUrl: string, proxyUrl: string, headers: Record<str
 					return;
 				}
 				const secure = tls.connect({ socket: tunnel, servername: target.hostname });
-				secure.once('error', fail);
+				secure.on('error', fail);
 				readResponse(https.request({
 					createConnection: () => secure,
 					method,
@@ -1414,6 +1418,10 @@ function proxiedGetJson(targetUrl: string, proxyUrl: string, headers: Record<str
 					headers: reqHeaders
 				}));
 			});
+			// A refused proxy (ECONNREFUSED, the usual "proxy is not running")
+			// arrives here as a socket error that ClientRequest re-emits: without
+			// this listener Node reports an unhandled 'error' and exits.
+			connect.on('error', fail);
 			connect.end();
 		} else {
 			readResponse(http.request({

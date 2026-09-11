@@ -145,6 +145,9 @@ API-key 端点前无法支持。
 - **DOM 安全** —— 卡片只用 `createElement`/`textContent` 构建 DOM，API 返回值绝不
   经过 `innerHTML`；技术错误（401、超时、凭据缺失、代理拒绝）只写入 `title` 悬停提示
   或行内错误文案。
+- **代理故障绝不会带崩宿主** —— 代理引擎打开的每个 socket 与请求都会把 `error`
+  事件汇入该行结果，因此代理不可达（例如 clash 没开、`ECONNREFUSED 127.0.0.1:7890`）
+  只显示为该行的错误，而不是未处理的 EventEmitter error。
 
 ## 需要的配置
 
@@ -496,6 +499,10 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.9.2-rc.3** —— 修复代理引擎导致的宿主崩溃：CONNECT 隧道请求没有挂 `error`
+  监听，代理不可达（`ECONNREFUSED 127.0.0.1:7890`，即代理没开）时会以 Node 的
+  `Emitted 'error' event on ClientRequest instance` 直接让 `dsh web` 退出。现在每个
+  socket 与请求都会把 `error` 汇入该行结果，代理挂掉只降级为行内错误提示。
 - **v0.9.2-rc.2** —— 恢复宿主侧在 `@deepseek-ai/dsh@0.1.5-rc.1` 及更新版本上的可用性。这些版本里 `connection.rpc.handle()` 对第三方插件已不可用：其路由销毁回调会读取 `owner.webServer`，而该 owner 解析到 Connection 插件自身的 fiber，那里永远没有 `webServer`——注册在子 fiber 内抛错，所以启动日志一片安静、通道却凭空消失。宿主侧现改为通过 `connection.fetch.register()`（只需 `owner.effect`）为每个端点挂载一条精确 Fetch 路由，位于 DSH 自带 `/api` 鉴权通道之下：`POST /api/dsh-quota-panel/<endpoint>`。本版本取代 rc.1；rc.1 的功能虽已合入，但在当前 DSH 上 RPC 端点缺失，因此不得直接晋升稳定版。
 - **v0.9.2-rc.1** —— 火山方舟 Agent Plan 与 Coding Plan **拆成两行同时显示**（此前是「先查 Agent Plan、无数据才回落 Coding Plan」的单行二选一）。两个套餐现在像两个独立供应商一样各自一行、共享同一对 AK/SK：Agent 行（`volcengine-agent`，`GetAFPUsage`，5h/周/月）与 Coding 行（`volcengine-coding`，`GetCodingPlanUsage`，会话/周/月）分别只查自己的接口、互不回落，未订阅的套餐显示独立的「未订阅」提示。Coding 行悬停标题的滚动窗口改标为 `session:`（会话限额而非 5h 窗口），并在火山排错段补充了旧行 id（`volcengine` / `volcengine-usage`）的迁移说明。
 - **v0.8.1-rc.6** —— issue #1 布局修复（重构版）：面板现在**可拖动**——抓住收起态

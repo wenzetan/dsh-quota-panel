@@ -1117,6 +1117,60 @@ check('A: invalid client proxy -> row error', (() => {
 proxy.close();
 upstream.close();
 
+// A proxy whose TCP port refuses connections (proxy not started, the common
+// `ECONNREFUSED 127.0.0.1:7890` case) must surface as a per-row error. The
+// CONNECT request re-emits the socket error, so without its own 'error'
+// listener Node treats it as unhandled and kills the host process — this block
+// dying is the regression signal.
+{
+	const deadPort = await new Promise((resolve) => {
+		const srv = http.createServer();
+		srv.listen(0, '127.0.0.1', () => {
+			const { port } = srv.address();
+			srv.close(() => resolve(port));
+		});
+	});
+	credentialMap = { LOCAL_KEY: 'sk-local' };
+	handler = mount({
+		proxies: { dead: `http://127.0.0.1:${deadPort}` },
+		providers: [
+			{ id: 'dead-https', label: 'DeadHTTPS', credential: 'LOCAL_KEY', endpoint: 'https://blocked.example/user/balance', format: 'deepseek-balance', proxy: 'dead' },
+			{ id: 'dead-http', label: 'DeadHTTP', credential: 'LOCAL_KEY', endpoint: 'http://127.0.0.1:9/user/balance', format: 'deepseek-balance', proxy: 'dead' }
+		]
+	});
+	const deadFetch = await handler('fetch-all', null, undefined);
+	check('A: refused proxy TCP connect -> per-row error (https/CONNECT)', (() => {
+		const row = deadFetch.value.rows.find((r) => r.id === 'dead-https');
+		return row && typeof row.error === 'string' && /ECONNREFUSED|proxy/i.test(row.error) && row.view === undefined;
+	})());
+	check('A: refused proxy TCP connect -> per-row error (http absolute-URI)', (() => {
+		const row = deadFetch.value.rows.find((r) => r.id === 'dead-http');
+		return row && typeof row.error === 'string' && /ECONNREFUSED|proxy/i.test(row.error);
+	})());
+}
+
+// A proxy that accepts TCP and then drops the socket before answering CONNECT
+// must behave the same way (socket hang up, never an unhandled error).
+{
+	const dropProxy = http.createServer();
+	dropProxy.on('connect', (_req, clientSocket) => { clientSocket.destroy(); });
+	await new Promise((r) => dropProxy.listen(0, '127.0.0.1', r));
+	const dropPort = dropProxy.address().port;
+	credentialMap = { LOCAL_KEY: 'sk-local' };
+	handler = mount({
+		proxies: { drop: `http://127.0.0.1:${dropPort}` },
+		providers: [
+			{ id: 'dropped', label: 'Dropped', credential: 'LOCAL_KEY', endpoint: 'https://blocked.example/user/balance', format: 'deepseek-balance', proxy: 'drop' }
+		]
+	});
+	const droppedFetch = await handler('fetch-all', null, undefined);
+	check('A: proxy dropping the CONNECT socket -> per-row error', (() => {
+		const row = droppedFetch.value.rows[0];
+		return row && typeof row.error === 'string' && row.view === undefined;
+	})());
+	dropProxy.close();
+}
+
 // ---------- A5: Config schema ----------
 check('A: Config defaults', (() => {
 	const filled = plugin.Config({});
