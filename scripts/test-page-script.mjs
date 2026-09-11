@@ -28,27 +28,37 @@ const check = (name, pass) => {
 	console.log(`${pass ? 'PASS' : 'FAIL'}: ${name}`);
 	if (!pass) ok = false;
 };
-
 // ---------- Part A: host half ----------
-const registrations = [];
+// The plugin mounts one exact Fetch route per RPC endpoint on Connection's
+// authenticated `/api` channel. `connection.rpc.handle` is NOT usable from a
+// third-party plugin on DSH 0.1.5+: its route disposer reads `owner.webServer`,
+// and the tracked-service owner resolution walks the Connection plugin's own
+// fiber chain, which never contains webServer. The Fetch registry only needs
+// `owner.effect`, and every route inherits the /api trust + browser fence.
+const routes = [];
 let credentialMap = {};
+const fetchRegistry = (sink) => ({ register: (route) => { sink.push(route); return async () => {}; } });
 const hostCtx = {
-	connection: {
-		rpc: {
-			handle: (channel, handler, options) => {
-				registrations.push({ channel, handler, options });
-				return async () => {};
-			}
-		}
-	},
+	connection: { fetch: fetchRegistry(routes) },
 	credentials: {
 		resolve: async (ref) => credentialMap[ref] ? { value: credentialMap[ref], source: 'file' } : undefined
 	}
 };
+const rpcRequest = (endpoint, payload, rpcId = `test-${endpoint}`, method = plugin.rpcMethod(endpoint)) =>
+	new Request(`http://dsh.invalid${plugin.rpcRoutePath(endpoint)}`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ type: 'client-request', rpcId, method, payload })
+	});
+const callRoute = async (sink, endpoint, payload) => {
+	const route = sink.find((r) => r.path === plugin.rpcRoutePath(endpoint));
+	if (!route) throw new Error(`quota-panel test: no Fetch route for ${endpoint}`);
+	return (await (await route.fetch(rpcRequest(endpoint, payload))).json()).result;
+};
 const mount = (config) => {
-	registrations.length = 0;
+	routes.length = 0;
 	plugin.apply(hostCtx, structuredClone(config));
-	return registrations[0].handler;
+	return (endpoint, payload) => callRoute(routes, endpoint, payload);
 };
 
 // ---------- A1: explicit rows (auto rows replaced by same-id entries) ----------
@@ -61,9 +71,40 @@ let handler = mount({
 	]
 });
 
-check('A: one RPC registration', registrations.length === 1);
-check('A: channel /dsh-quota-panel', registrations[0]?.channel === '/dsh-quota-panel');
-check('A: authority loopback', registrations[0]?.options?.authority === 'loopback');
+check('A: one Fetch route per RPC endpoint', routes.length === plugin.RPC_ENDPOINTS.length);
+check('A: specs + fetch-all + chatgpt routes registered', plugin.RPC_ENDPOINTS.every((endpoint) => routes.some((r) => r.path === plugin.rpcRoutePath(endpoint))));
+check('A: routes live on the authenticated /api channel', routes.every((r) => r.path === `/api/dsh-quota-panel/${r.path.split('/').pop()}` && r.path.startsWith('/api/dsh-quota-panel/')));
+check('A: routes are POST-only buffered JSON endpoints', routes.every((r) => r.requestBody === 'buffered' && Array.isArray(r.methods) && r.methods.length === 1 && r.methods[0] === 'POST' && typeof r.fetch === 'function'));
+check('A: no third-party rpc.handle registration', !('rpc' in hostCtx.connection));
+check('A: rpc method namespace', plugin.rpcMethod('specs') === 'dsh-quota-panel/specs' && plugin.rpcRoutePath('specs') === '/api/dsh-quota-panel/specs');
+
+// Envelope contract: the browser half posts {type:'client-request', rpcId,
+// method, payload} through Connection's own client RPC helper and validates
+// {type:'server-response', rpcId, result} with result {ok:true,value} or
+// {ok:false,error:{code,message,details}}.
+{
+	const specsRoute = routes.find((r) => r.path === plugin.rpcRoutePath('specs'));
+	const good = await specsRoute.fetch(rpcRequest('specs', null, 'env-1'));
+	const goodBody = await good.json();
+	check('A: server-response envelope round-trip', good.status === 200
+		&& goodBody.type === 'server-response' && goodBody.rpcId === 'env-1'
+		&& goodBody.result?.ok === true && Array.isArray(goodBody.result.value.rows));
+	const bad = await specsRoute.fetch(new Request(`http://dsh.invalid${plugin.rpcRoutePath('specs')}`, {
+		method: 'POST', headers: { 'content-type': 'application/json' }, body: '{not json'
+	}));
+	const badBody = await bad.json();
+	check('A: malformed JSON body -> error envelope', badBody.type === 'server-response' && badBody.result?.ok === false
+		&& typeof badBody.result.error.code === 'string' && typeof badBody.result.error.message === 'string'
+		&& typeof badBody.result.error.details === 'object' && !Array.isArray(badBody.result.error.details));
+	const mismatch = await specsRoute.fetch(rpcRequest('specs', null, 'env-2', 'dsh-quota-panel/fetch-all'));
+	const mismatchBody = await mismatch.json();
+	check('A: method/route mismatch -> error envelope', mismatchBody.type === 'server-response' && mismatchBody.rpcId === 'env-2'
+		&& mismatchBody.result?.ok === false && mismatchBody.result.error.code === 'gateway/bad-request');
+	const wrongType = await specsRoute.fetch(new Request(`http://dsh.invalid${plugin.rpcRoutePath('specs')}`, {
+		method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'nope'
+	}));
+	check('A: non-JSON content type refused', wrongType.status === 415);
+}
 
 let specs = await handler('specs', null, undefined);
 check('A: explicit rows replace catalog ids', specs.ok === true && specs.value.rows.length === 2);
@@ -106,8 +147,10 @@ check('A: opencode row normalized to usage view', (() => {
 	return row && row.view?.kind === 'usage' && row.view.windows?.rolling?.percent === 45 && row.view.windows?.monthly?.percent === 10;
 })());
 
-const unknown = await handler('bogus', null, undefined);
-check('A: unknown endpoint -> ok:false', unknown.ok === false && unknown.error.code === 'internal');
+// Unknown endpoints never reach the dispatcher: Connection only routes the exact
+// paths this plugin registered, and answers anything else itself.
+check('A: no catch-all route for unknown endpoints', !routes.some((r) => r.path.endsWith('/bogus'))
+	&& routes.every((r) => plugin.RPC_ENDPOINTS.some((endpoint) => r.path === plugin.rpcRoutePath(endpoint))));
 
 // ---------- A2: catalog auto discovery ----------
 credentialMap = { DEEPSEEK_API_KEY: 'sk-ds', OPENROUTER_API_KEY: 'sk-or', ZHIPU_API_KEY: 'sk-zp' };
@@ -512,15 +555,15 @@ process.env.CODEX_HOME = codexFixture;
 // load — it is constant regardless, so a plain apply() suffices).
 let cgHandler;
 {
-	const cgRegs = [];
+	const cgRoutes = [];
 	const cgCtx = {
-		connection: { rpc: { handle: (ch, h) => { cgRegs.push({ ch, h }); return async () => {}; } } },
+		connection: { fetch: fetchRegistry(cgRoutes) },
 		credentials: { resolve: async () => undefined }
 	};
 	plugin.apply(cgCtx, {});
-	cgHandler = cgRegs[0].h;
+	cgHandler = (endpoint, payload) => callRoute(cgRoutes, endpoint, payload);
 }
-const cgSpecs = await cgHandler('specs', null, undefined);
+const cgSpecs = await cgHandler('specs', null);
 check('A: chatgpt row discovered when auth.json exists', (() => {
 	const row = cgSpecs.value.rows.find((r) => r.id === 'chatgpt');
 	return !!row && row.kind === 'usage' && row.windowLabels?.rolling === '5h' && row.windowLabels?.weekly === '周';
@@ -603,10 +646,10 @@ check('A: chatgpt missing durations -> positional 5h/weekly defaults', (() => {
 })());
 // Missing auth.json -> row hidden (probes file existence)
 process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-nocodex-'));
-const noRegs = [];
-const noCtx = { connection: { rpc: { handle: (ch, h) => { noRegs.push({ ch, h }); return async () => {}; } } }, credentials: { resolve: async () => undefined } };
+const noRoutes = [];
+const noCtx = { connection: { fetch: fetchRegistry(noRoutes) }, credentials: { resolve: async () => undefined } };
 plugin.apply(noCtx, {});
-const noSpecs = await noRegs[0].h('specs', null, undefined);
+const noSpecs = await callRoute(noRoutes, 'specs', null);
 check('A: chatgpt hidden when auth.json does not exist', !noSpecs.value.rows.some((r) => r.id === 'chatgpt'));
 process.env.CODEX_HOME = prevCodexHome;
 
@@ -625,10 +668,10 @@ process.env.CODEX_HOME = prevCodexHome;
 		tokens: { access_token: 'eyJ.dsh-access', refresh_token: 'rt-dsh', id_token: 'x', expires_at_ms: exp }
 	}));
 	const regs = [];
-	const ctx2 = { connection: { rpc: { handle: (ch, h) => { regs.push({ ch, h }); return async () => {}; } } }, credentials: { resolve: async () => undefined } };
+	const ctx2 = { connection: { fetch: fetchRegistry(regs) }, credentials: { resolve: async () => undefined } };
 	plugin.apply(ctx2, {});
-	const h2 = regs[0].h;
-	const s2 = await h2('specs', null, undefined);
+	const h2 = (endpoint, payload) => callRoute(regs, endpoint, payload);
+	const s2 = await h2('specs', null);
 	check('A: chatgpt discovered via DSH store without Codex auth.json', s2.value.rows.some((r) => r.id === 'chatgpt'));
 	const st = await h2('chatgpt-auth-status', null, undefined);
 	check('A: chatgpt-auth-status reports source=dsh + plan', st.ok && st.value.source === 'dsh' && st.value.loggedIn === true && st.value.plan_type === 'pro');
@@ -648,9 +691,9 @@ process.env.CODEX_HOME = prevCodexHome;
 	process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-empty-dsh-'));
 	process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'dsh-qp-empty-codex-'));
 	const regs = [];
-	const ctx3 = { connection: { rpc: { handle: (ch, h) => { regs.push({ ch, h }); return async () => {}; } } }, credentials: { resolve: async () => undefined } };
+	const ctx3 = { connection: { fetch: fetchRegistry(regs) }, credentials: { resolve: async () => undefined } };
 	plugin.apply(ctx3, {});
-	const h3 = regs[0].h;
+	const h3 = (endpoint, payload) => callRoute(regs, endpoint, payload);
 	// cancel is safe even with nothing in flight
 	const c = await h3('chatgpt-login-cancel', null, undefined);
 	check('A: chatgpt-login-cancel is safe with no in-flight login', c.ok === true && c.value.cancelled === true);
@@ -1088,7 +1131,8 @@ check('A: Config rejects bad id pattern', (() => {
 	try { plugin.Config({ providers: [{ id: 'Bad_Id', label: 'X', credential: 'C', endpoint: 'https://x.example/q' }] }); return false; }
 	catch { return true; }
 })());
-check('A: inject is connection+credentials', JSON.stringify(plugin.inject) === JSON.stringify(['connection', 'credentials']));
+check('A: inject includes connection+credentials', JSON.stringify(plugin.inject) === JSON.stringify(['connection', 'credentials']));
+check('A: webServer is not required (routes ride connection.fetch)', !plugin.inject.includes('webServer'));
 
 // ---------- Part B: client half ----------
 const clientSource = readFileSync(join(root, 'lib/client.js'), 'utf8');
@@ -1289,7 +1333,7 @@ const surface = {
 	'settings: reset button key': clientSource.includes('resetDefaults'),
 	'settings persist localStorage': clientSource.includes('localStorage') && clientSource.includes('dsh-quota-panel:settings'),
 	'pointer-events opt-in (overlay)': clientSource.includes('pointer-events:auto'),
-	'rpc channel matches host': clientSource.includes('"/dsh-quota-panel"') && clientSource.includes('"specs"') && clientSource.includes('"fetch-all"'),
+	'rpc channel matches host': clientSource.includes(`"${plugin.RPC_CHANNEL}"`) && clientSource.includes(`"${plugin.RPC_METHOD_PREFIX}"`) && clientSource.includes('"specs"') && clientSource.includes('"fetch-all"'),
 	'rpc error keys': clientSource.includes('loadFailed') && clientSource.includes('fetchFailed'),
 	'hidden-page skip': clientSource.includes('document.hidden'),
 	'visibilitychange': clientSource.includes('visibilitychange'),

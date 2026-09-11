@@ -86,8 +86,9 @@ Settings panel (⚙), dark theme:
   `--dsw-font-*`) with sensible fallbacks, so it follows the product
   theme (light/dark) and ships no palette of its own.
 - **Security by construction** — API keys never reach the browser; the
-  browser talks only to a loopback-only RPC channel and receives only
-  normalized views (see "How it works").
+  browser talks only to this plugin's methods inside DSH's own
+  authenticated `/api` channel and receives only normalized views (see
+  "How it works").
 
 ## Not supported (yet)
 
@@ -139,9 +140,9 @@ an API-key endpoint.
 │  localStorage: visibility · interval · thresholds ·    │
 │                proxy URLs (frontend settings)          │
 └──────────────┬─────────────────────────────────────────┘
-               │ loopback-only Connection RPC: /dsh-quota-panel
-               │   specs (render hints, no credentials)
-               │   fetch-all { proxy: {rowId: url} } → normalized views
+               │ Connection /api channel (browser-session fenced):
+               │   POST /api/dsh-quota-panel/specs (render hints)
+               │   POST /api/dsh-quota-panel/fetch-all { proxy: {...} }
 ┌──────────────▼────────────── host (lib/index.js) ──────┐
 │  ctx.credentials → API keys (never leave the host)      │
 │  catalog probe → auto discovery (15 built-in providers) │
@@ -151,16 +152,24 @@ an API-key endpoint.
 └─────────────────────────────────────────────────────────┘
 ```
 
-- **Host half** (`lib/index.js`) registers one loopback-only Connection
-  RPC channel `/dsh-quota-panel` with two endpoints:
-  - `specs` — the resolved rows with render hints only (id, label, row
-    kind, currency, threshold tiers, window labels, configured proxy name).
-    No credentials, no endpoints.
-  - `fetch-all` — fetches every visible row, normalizes each upstream
-    response into a **generic view model** (`balance` / `usage` /
-    `info`), and returns `{rows: [{id, view} | {id, error}], fetchedAt}`.
+- **Host half** (`lib/index.js`) mounts one exact Fetch route per endpoint on
+  the Connection service's authenticated `/api` channel, under the
+  `dsh-quota-panel` method namespace:
+  - `POST /api/dsh-quota-panel/specs` — the resolved rows with render hints
+    only (id, label, row kind, currency, threshold tiers, window labels,
+    configured proxy name). No credentials, no endpoints.
+  - `POST /api/dsh-quota-panel/fetch-all` — fetches every visible row,
+    normalizes each upstream response into a **generic view model**
+    (`balance` / `usage` / `info`), and returns
+    `{rows: [{id, view} | {id, error}], fetchedAt}`.
     Raw upstream JSON stays host-side like the keys; one failing row never
     affects the others.
+  - `POST /api/dsh-quota-panel/chatgpt-auth-status` /
+    `chatgpt-login-start` / `chatgpt-login-cancel` / `chatgpt-logout` —
+    the optional ChatGPT subscription device-login flow.
+  Requests are fenced by DSH's own `/api` route (trusted host + browser
+  session), so the endpoints are not reachable from another machine or from
+  a client without the page session.
 - **Auto discovery** — because DSH's credential store has no enumeration
   API, the host half probes the catalog entries' standard refs each fetch
   cycle; every entry whose key resolves joins the panel, and entries with
@@ -604,6 +613,17 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **v0.9.2-rc.2** — Restores the host half on `@deepseek-ai/dsh@0.1.5-rc.1` and
+  newer. `connection.rpc.handle()` no longer works for third-party plugins
+  there: its route disposer reads `owner.webServer`, and that owner resolves to
+  the Connection plugin's own fiber, which never holds `webServer` — the
+  registration throws inside a child fiber, so boot stays silent while the
+  channel disappears. The host half now mounts one exact Fetch route per
+  endpoint through `connection.fetch.register()` (which needs only
+  `owner.effect`), under DSH's own authenticated `/api` channel:
+  `POST /api/dsh-quota-panel/<endpoint>`. This supersedes rc.1, which remains
+  merged but must not be promoted because its RPC endpoints are missing on
+  current DSH.
 - **v0.9.2-rc.1** — Volcengine Ark Agent Plan and Coding Plan are now **shown as
   two rows at once** (previously a single row queried Agent Plan first and fell
   back to Coding Plan). The two subscriptions render as two independent
@@ -719,8 +739,9 @@ This plugin builds on community work — thanks to:
 ## Security
 
 - API keys are resolved host-side via `ctx.credentials` and used only for
-  host-side requests to providers; the browser talks exclusively over the
-  loopback RPC channel `/dsh-quota-panel`, the `specs` endpoint ships
+  host-side requests to providers; the browser talks exclusively to the
+  plugin's methods on Connection's authenticated `/api` channel
+  (`/api/dsh-quota-panel/<method>`), the `specs` endpoint ships
   render hints only (labels/kinds/thresholds) with no credential or
   endpoint; since v0.5 `fetch-all` ships normalized views only — raw
   upstream JSON stays host-side too.
@@ -740,12 +761,14 @@ routing a provider through a proxy:
    targets the key rides in the CONNECT request (outside the TLS tunnel), for
    http targets in the absolute-URI request. The proxy operator can therefore
    read every API key routed through it.
-2. **The loopback RPC channel accepts an arbitrary proxy URL per row.** The
+2. **The plugin accepts an arbitrary proxy URL per row.** The
    browser-side proxy field is sent to the host in the `fetch-all` payload
-   and validated only as http/https. Per the platform contract the channel is
-   loopback-only and unauthenticated, so any process that can reach
-   `http://127.0.0.1:3080` can POST a proxy override pointing at an
-   arbitrary server and have the host send your provider keys to it.
+   and validated only as http/https. The endpoint itself sits behind DSH's
+   `/api` fence (trusted host + browser session), so a caller needs the page
+   session of the running `dsh web` — but anyone who *does* hold that session
+   (or a script driving the same browser profile) can POST a proxy override
+   pointing at an arbitrary server and have the host send your provider keys
+   to it.
 
 **Stay safe:**
 
@@ -757,9 +780,10 @@ routing a provider through a proxy:
   from keys used anywhere else, with the least privilege your provider offers
   (billing/balance-only scopes where available), and rotate them if a proxy
   was ever shared or is suspected compromised.
-- **Run `dsh web` only on machines you trust.** The loopback RPC surface is
-  unauthenticated by design (see 2); don't expose the port to other users or
-  the network.
+- **Run `dsh web` only on machines you trust.** The plugin's endpoints sit
+  behind DSH's `/api` fence (trusted host + browser session), so they are not
+  open to the network; keep it that way by not exposing the port to other
+  users or the network.
 - Proxy URLs are stored in browser localStorage as entered — prefer proxies
   without embedded credentials, or a dedicated local proxy that needs none.
 

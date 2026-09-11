@@ -245,29 +245,77 @@ jobs:
             return 1
           }
 
-          wait_for 200 GET http://127.0.0.1:3080/ || {
+          # DSH fences the web surface behind a browser session: `dsh web`
+          # prints a one-time `?token=` URL that exchanges for the session
+          # cookie, and every probe below (including `/api`) needs that
+          # cookie. Older DSH served plain loopback probes, so a missing
+          # token just leaves AUTH empty instead of failing the gate.
+          COOKIE_JAR="$RUNNER_TEMP/dsh-cookies"
+          AUTH=()
+          TOKEN=""
+          for _ in $(seq 1 60); do
+            kill -0 "$WEB_PID" 2>/dev/null || break
+            TOKEN="$(grep -o 'token=[A-Za-z0-9_-]*' "$LOG" 2>/dev/null | head -1 | cut -d= -f2 || true)"
+            if [ -n "$TOKEN" ]; then
+              curl -s -c "$COOKIE_JAR" -o /dev/null "http://127.0.0.1:3080/?token=$TOKEN" || true
+              if [ -s "$COOKIE_JAR" ]; then break; fi
+            fi
+            sleep 1
+          done
+          if [ -s "$COOKIE_JAR" ]; then
+            AUTH=(-b "$COOKIE_JAR")
+            echo "browser session established from the startup token"
+          else
+            echo "no startup token in the log; probing without a session (older DSH)"
+          fi
+
+          wait_for 200 GET http://127.0.0.1:3080/ "${AUTH[@]}" || {
             echo "::error::dsh web did not become ready on :3080 (last HTTP $LAST_CODE)"
             cat "$LOG"
             exit 1
           }
           echo "web ready on :3080"
 
-          # The plugin's browser half is served for the module loader.
-          wait_for 200 GET http://127.0.0.1:3080/plugins/dsh-quota-panel/client.js || {
+          # The plugin's browser half is served for the module loader. DSH
+          # 0.1.5 composes revisioned module URLs
+          # (`/plugins/??<id>/client.js&rev=<rev>`) and 404s the plain path,
+          # so read the advertised URL out of the boot payload; fall back to
+          # the plain path for older versions.
+          BOOT_HTML="$RUNNER_TEMP/boot.html"
+          curl -s -o "$BOOT_HTML" "${AUTH[@]}" http://127.0.0.1:3080/ || true
+          CLIENT_URL="$(node -e '
+            const fs = require("node:fs")
+            let html = ""
+            try { html = fs.readFileSync(process.argv[1], "utf8") } catch {}
+            const m = /"id":"dsh-quota-panel","url":"([^"]+)"/.exec(html)
+            process.stdout.write(m ? m[1].replace(/&amp;/g, "&") : "")
+          ' "$BOOT_HTML" 2>/dev/null || true)"
+          if [ -z "$CLIENT_URL" ]; then
+            CLIENT_URL="/plugins/dsh-quota-panel/client.js"
+            echo "boot payload advertised no module URL; probing $CLIENT_URL"
+          else
+            echo "advertised client module: $CLIENT_URL"
+          fi
+          wait_for 200 GET "http://127.0.0.1:3080$CLIENT_URL" "${AUTH[@]}" || {
             echo "::error::client bundle not served (HTTP $LAST_CODE)"
             cat "$LOG"
             exit 1
           }
           client="$LAST_CODE"
 
-          # The plugin's RPC channel. 405 = the SPA fallback rejecting the
-          # POST, i.e. the channel did not register; retried until 200 so a
-          # late registration still passes, then asserted functionally below.
-          wait_for 200 POST http://127.0.0.1:3080/dsh-quota-panel/specs \
+          # The plugin's RPC endpoints ride Connection's authenticated /api
+          # channel: 405 = the SPA fallback rejecting the POST (the route did
+          # not register), 401/403 = the /api fence rejected the probe.
+          wait_for 200 POST http://127.0.0.1:3080/api/dsh-quota-panel/specs \
+            "${AUTH[@]}" \
             -H 'content-type: application/json' \
-            -d '{"type":"client-request","rpcId":"ci-boot","method":"specs","payload":null}' || {
+            -d '{"type":"client-request","rpcId":"ci-boot","method":"dsh-quota-panel/specs","payload":null}' || {
             if [ "$LAST_CODE" = "405" ]; then
-              echo "::error::RPC channel /dsh-quota-panel missing (405) — the channel did not register"
+              echo "::error::RPC endpoint /api/dsh-quota-panel/specs missing (405) — the route did not register"
+            elif [ "$LAST_CODE" = "404" ]; then
+              echo "::error::RPC endpoint /api/dsh-quota-panel/specs unknown to the API channel (404) — the plugin mounted no route (check the boot log for a failed plugin mount)"
+            elif [ "$LAST_CODE" = "401" ] || [ "$LAST_CODE" = "403" ]; then
+              echo "::error::RPC endpoint answered $LAST_CODE — the /api fence rejected the session cookie"
             else
               echo "::error::specs RPC answered HTTP $LAST_CODE"
             fi

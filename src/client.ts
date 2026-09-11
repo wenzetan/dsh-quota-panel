@@ -29,7 +29,10 @@
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		var React = require("react");
 
-		var CHANNEL = "/dsh-quota-panel";
+		// Connection's authenticated /api channel; the host half mounts one exact
+		// Fetch route per endpoint under the dsh-quota-panel method namespace.
+		var CHANNEL = "/api";
+		var RPC_METHOD_PREFIX = "dsh-quota-panel";
 		var STORAGE_KEY = "dsh-quota-panel:settings";
 
 		var REFRESH_CHOICES = [
@@ -892,11 +895,11 @@
 				}, [panelPos ? panelPos.x + ":" + panelPos.y : ""]);
 
 				var call = function (endpoint, payload) {
-					return ctx.connection.rpc.call(CHANNEL, endpoint, payload);
+					return ctx.connection.rpc.call(CHANNEL, RPC_METHOD_PREFIX + "/" + endpoint, payload);
 				};
 
 				var loadSpecs = function () {
-					return ctx.connection.rpc.call(CHANNEL, "specs", null).then(function (result) {
+					return call("specs", null).then(function (result) {
 						if (result && result.ok === true && result.value && Array.isArray(result.value.rows)) {
 							setSpecs(result.value);
 						} else {
@@ -915,7 +918,7 @@
 							if (typeof v === "string" && v.trim() !== "") proxyPayload[key] = v.trim();
 						}
 					}
-					return ctx.connection.rpc.call(CHANNEL, "fetch-all", { proxy: proxyPayload }).then(function (result) {
+					return call("fetch-all", { proxy: proxyPayload }).then(function (result) {
 						if (result && result.ok === true && result.value && Array.isArray(result.value.rows)) {
 							var map = {};
 							for (var i = 0; i < result.value.rows.length; i++) {

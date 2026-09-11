@@ -85,8 +85,40 @@ export const name = 'quota-panel';
 
 export const inject = ['connection', 'credentials'];
 
-/** Loopback-only Connection RPC channel this plugin owns. */
-export const RPC_CHANNEL = '/dsh-quota-panel';
+/**
+ * Connection channel that carries this plugin's RPC methods.
+ *
+ * DSH mounts every plugin HTTP surface inside the authenticated `/api`
+ * channel, whose own route applies the trusted-host + browser-session fence
+ * before dispatching. The dedicated prefix `/dsh-quota-panel` this plugin used
+ * before DSH 0.1.5 is no longer reachable: `connection.rpc.handle` mounts its
+ * route from the *Connection plugin's* fiber, which never holds `webServer`,
+ * so `owner.webServer.register` throws and the channel silently disappears.
+ */
+export const RPC_CHANNEL = '/api';
+
+/** Method namespace owned by this plugin under {@link RPC_CHANNEL}. */
+export const RPC_METHOD_PREFIX = 'dsh-quota-panel';
+
+/** RPC endpoints served by the host half. */
+export const RPC_ENDPOINTS = [
+	'specs',
+	'fetch-all',
+	'chatgpt-auth-status',
+	'chatgpt-login-start',
+	'chatgpt-login-cancel',
+	'chatgpt-logout'
+] as const;
+
+/** Method name the browser half sends for one endpoint. */
+export function rpcMethod(endpoint: string): string {
+	return `${RPC_METHOD_PREFIX}/${endpoint}`;
+}
+
+/** Exact Fetch route path Connection serves one endpoint on. */
+export function rpcRoutePath(endpoint: string): string {
+	return `${RPC_CHANNEL}/${rpcMethod(endpoint)}`;
+}
 
 /** Upstream fetch timeout per provider row. */
 const UPSTREAM_TIMEOUT_MS = 15000;
@@ -1712,10 +1744,74 @@ async function fetchRow(ctx, provider, proxies, clientProxyUrl) {
 	}
 }
 
+/** rpcId Connection substitutes for an envelope it cannot parse. */
+const INVALID_RPC_ID = 'invalid-request';
+
+/** Compose one `server-response` envelope Connection's client RPC helper accepts. */
+function rpcEnvelope(rpcId: string, result: Record<string, any>, status = 200): Response {
+	return new Response(JSON.stringify({ type: 'server-response', rpcId, result }), {
+		status,
+		headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
+	});
+}
+
+/** Failure result shape Connection's client validates (`details` must be an object). */
+function rpcError(code: string, message: string, details: Record<string, any> = {}): Record<string, any> {
+	return { ok: false, error: { code, message, details } };
+}
+
 /**
- * Apply the plugin: normalize config and own the loopback RPC channel.
- * Channel registrations belong to the caller fiber (disposed with it), so no
- * explicit effect wrapper is needed.
+ * Serve one endpoint inside Connection's `/api` fence.
+ *
+ * The browser half calls Connection's client RPC helper, which posts
+ * `{type:'client-request', rpcId, method, payload}` and requires a
+ * `{type:'server-response', rpcId, result}` reply. Connection owns the
+ * trusted-host + browser-session check on the `/api` route that dispatches
+ * here, so this function only owns the envelope and the endpoint value.
+ * @param endpoint - endpoint this route serves.
+ * @param request - inbound POST request.
+ * @param handle - endpoint dispatcher from {@link apply}.
+ * @returns the JSON response Connection's client validates.
+ */
+async function rpcResponse(
+	endpoint: string,
+	request: Request,
+	handle: (endpoint: string, payload: any, signal?: AbortSignal) => Promise<Record<string, any>>
+): Promise<Response> {
+	const contentType = (request.headers.get('content-type') ?? '').split(';', 1)[0].trim().toLowerCase();
+	if (contentType !== 'application/json') {
+		return rpcEnvelope(INVALID_RPC_ID, rpcError('gateway/bad-request', 'content type must be application/json'), 415);
+	}
+	let message: any;
+	try {
+		message = await request.json();
+	} catch {
+		return rpcEnvelope(INVALID_RPC_ID, rpcError('gateway/bad-request', 'body is not JSON'));
+	}
+	if (!message || typeof message !== 'object' || Array.isArray(message) || message.type !== 'client-request' || typeof message.rpcId !== 'string') {
+		return rpcEnvelope(INVALID_RPC_ID, rpcError('gateway/bad-request', 'invalid client-request message'));
+	}
+	const expected = rpcMethod(endpoint);
+	if (message.method !== expected) {
+		return rpcEnvelope(message.rpcId, rpcError('gateway/bad-request', `method ${JSON.stringify(String(message.method))} does not match endpoint ${JSON.stringify(expected)}`));
+	}
+	try {
+		return rpcEnvelope(message.rpcId, await handle(endpoint, message.payload, request.signal));
+	} catch (error) {
+		return rpcEnvelope(message.rpcId, rpcError('internal', String((error && (error as any).message) || error)));
+	}
+}
+
+/**
+ * Apply the plugin: normalize config and mount the RPC routes.
+ *
+ * Route registrations belong to the caller fiber (disposed with it). They ride
+ * Connection's exact Fetch registry rather than `connection.rpc.handle`: in DSH
+ * 0.1.5+ that channel's disposer resolves `owner.webServer` against the
+ * Connection plugin's own fiber, which never holds `webServer`, so a
+ * third-party channel throws inside a child fiber and vanishes without a boot
+ * error. The Fetch registry needs only `owner.effect`, and the `/api` route that
+ * dispatches it already enforces the trusted-host + browser fence.
  * @param ctx - plugin context with connection and credentials services.
  * @param config - raw plugin config (schema-processed by the loader).
  */
@@ -1727,7 +1823,7 @@ export function apply(ctx, config: Record<string, any> = {}) {
 	const catalog = validateCatalog(raw.catalog, proxies);
 	const providers = validateProviders({ providers: Array.isArray(raw.providers) ? raw.providers : [], proxies });
 
-	ctx.connection.rpc.handle(RPC_CHANNEL, async (endpoint, payload, _signal) => {
+	const handleRpc = async (endpoint: string, payload: any, _signal?: AbortSignal) => {
 		try {
 			// ── ChatGPT subscription auth (device-code login) ──────
 			// These endpoints drive the in-plugin device-authorization
@@ -1810,5 +1906,14 @@ export function apply(ctx, config: Record<string, any> = {}) {
 		} catch (error) {
 			return { ok: false, error: { code: 'internal', message: String((error && error.message) || error), details: {} } };
 		}
-	}, { authority: 'loopback' });
+	};
+
+	for (const endpoint of RPC_ENDPOINTS) {
+		ctx.connection.fetch.register({
+			path: rpcRoutePath(endpoint),
+			methods: ['POST'],
+			requestBody: 'buffered',
+			fetch: (request: Request) => rpcResponse(endpoint, request, handleRpc)
+		});
+	}
 }

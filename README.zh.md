@@ -69,8 +69,8 @@ v0.5 起为**双面插件** + **内置供应商目录自动发现**：安装并�
 - **主题跟随** —— 完全使用 Harness 设计 Token（`--dsw-alias-*`、`--dsw-static-*`、
   `--dsw-shadow-*`、`--dsw-font-*`）驱动，token 缺失时有合理 fallback，
   自动跟随产品主题（浅色/深色），不携带自己的配色。
-- **构架即安全** —— API Key 绝不进入浏览器；浏览器只与仅回环的 RPC 通道通信，
-  只接收归一化视图（见「实现逻辑」）。
+- **构架即安全** —— API Key 绝不进入浏览器；浏览器只与本插件在 DSH 自带 `/api`
+  鉴权通道（受信任主机 + 浏览器会话围栏）中的方法通信，只接收归一化视图（见「实现逻辑」）。
 
 ## 不支持的功能（规划中）
 
@@ -113,9 +113,9 @@ API-key 端点前无法支持。
 │  localStorage: 显示开关 · 间隔 · 阈值 ·               │
 │                代理 URL（前端设置）                   │
 └──────────────┬─────────────────────────────────────────┘
-               │ 仅回环 Connection RPC: /dsh-quota-panel
-               │   specs（渲染提示，不含凭据）
-               │   fetch-all { proxy: {rowId: url} } → 归一化视图
+               │ Connection /api 通道（浏览器会话围栏）:
+               │   POST /api/dsh-quota-panel/specs（渲染提示）
+               │   POST /api/dsh-quota-panel/fetch-all { proxy }
 ┌──────────────▼────────────── host (lib/index.js) ──────┐
 │  ctx.credentials → API Key（绝不离开宿主）              │
 │  目录探测 → 自动发现（15 个内置供应商）                 │
@@ -496,6 +496,7 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **v0.9.2-rc.2** —— 恢复宿主侧在 `@deepseek-ai/dsh@0.1.5-rc.1` 及更新版本上的可用性。这些版本里 `connection.rpc.handle()` 对第三方插件已不可用：其路由销毁回调会读取 `owner.webServer`，而该 owner 解析到 Connection 插件自身的 fiber，那里永远没有 `webServer`——注册在子 fiber 内抛错，所以启动日志一片安静、通道却凭空消失。宿主侧现改为通过 `connection.fetch.register()`（只需 `owner.effect`）为每个端点挂载一条精确 Fetch 路由，位于 DSH 自带 `/api` 鉴权通道之下：`POST /api/dsh-quota-panel/<endpoint>`。本版本取代 rc.1；rc.1 的功能虽已合入，但在当前 DSH 上 RPC 端点缺失，因此不得直接晋升稳定版。
 - **v0.9.2-rc.1** —— 火山方舟 Agent Plan 与 Coding Plan **拆成两行同时显示**（此前是「先查 Agent Plan、无数据才回落 Coding Plan」的单行二选一）。两个套餐现在像两个独立供应商一样各自一行、共享同一对 AK/SK：Agent 行（`volcengine-agent`，`GetAFPUsage`，5h/周/月）与 Coding 行（`volcengine-coding`，`GetCodingPlanUsage`，会话/周/月）分别只查自己的接口、互不回落，未订阅的套餐显示独立的「未订阅」提示。Coding 行悬停标题的滚动窗口改标为 `session:`（会话限额而非 5h 窗口），并在火山排错段补充了旧行 id（`volcengine` / `volcengine-usage`）的迁移说明。
 - **v0.8.1-rc.6** —— issue #1 布局修复（重构版）：面板现在**可拖动**——抓住收起态
   胶囊或展开卡片头部即可拖到任意位置（指针捕获；5px 移动阈值，轻微晃动不影
@@ -578,10 +579,10 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 安全
 
-- API Key 仅由宿主侧通过 `ctx.credentials` 解析，只用于宿主侧到提供方的请求；浏览器只通过
-  回环 RPC 通道 `/dsh-quota-panel` 通信，`specs` 端点只下发渲染提示（标签/类型/阈值），
-  不含 credential 与 endpoint；v0.5 起 `fetch-all` 也只下发归一化视图，上游原始 JSON 同样
-  不出宿主。
+- API Key 仅由宿主侧通过 `ctx.credentials` 解析，只用于宿主侧到提供方的请求；浏览器只与
+  本插件在 DSH 自带 `/api` 鉴权通道中的方法通信（`/api/dsh-quota-panel/<method>`），
+  `specs` 端点只下发渲染提示（标签/类型/阈值），不含 credential 与 endpoint；v0.5 起
+  `fetch-all` 也只下发归一化视图，上游原始 JSON 同样不出宿主。
 - 卡片只使用 `createElement`/`textContent` 构建 DOM，API 返回值绝不经过 `innerHTML`；
   技术错误（401、超时、凭据缺失、代理拒绝）只写入 `title` 悬停提示或行内错误文案，
   单行失败不影响其他行。
@@ -594,9 +595,10 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
    （含 `Authorization: Bearer <key>`）一并发给代理服务器本身：https 目标时 key
    携带在 CONNECT 请求中（在 TLS 隧道之外），http 目标时携带在绝对 URI 请求中。
    代理运营方可以看到经过它的全部 API Key。
-2. **回环 RPC 通道逐行接受任意代理 URL。** 前端设置的代理 URL 随 `fetch-all`
-   payload 传给宿主，仅校验 http/https。按平台契约该通道仅回环、无鉴权，因此
-   任何能访问 `http://127.0.0.1:3080` 的本机进程都能 POST 一个指向任意服务器的
+2. **本插件逐行接受任意代理 URL。** 前端设置的代理 URL 随 `fetch-all`
+   payload 传给宿主，仅校验 http/https。端点本身位于 DSH 的 `/api` 围栏之内
+   （受信任主机 + 浏览器会话），因此调用方必须持有正在运行的 `dsh web` 的页面会话；
+   但持有该会话者（或用同一浏览器 profile 的脚本）仍能 POST 一个指向任意服务器的
    代理覆盖，诱使宿主把你的供应商 Key 发往该服务器。
 
 **安全使用建议：**
@@ -606,8 +608,8 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
   你的 Key（见第 1 点）。
 - **为经代理查询的供应商使用专用 Key**——与其它用途的 Key 隔离，选择供应商提供的
   最小权限（如仅余额/账单查询的 scope），代理一旦共享过或疑似泄露立即轮换。
-- **只在可信的机器上运行 `dsh web`。** 回环 RPC 面按设计无鉴权（见第 2 点），
-  不要把端口暴露给其他用户或网络。
+- **只在可信的机器上运行 `dsh web`。** 本插件端点在 DSH 的 `/api` 围栏之内
+  （受信任主机 + 浏览器会话），不对网络开放；请不要把端口暴露给其他用户或网络。
 - 代理 URL 会原样存入浏览器 localStorage——尽量使用不带账号密码的代理，或使用
   无需凭据的专用本地代理。
 
