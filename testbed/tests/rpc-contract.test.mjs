@@ -137,8 +137,40 @@ for (const key of ['credential', 'SeCrEt', 'api_key', 'api-key', 'API Key', 'end
   test(`validateSpecsResponse recursively rejects sensitive key form ${key}`, () => {
     rejectsWithoutEcho(
       response([{ ...usage, extra: { nested: { [key]: 'SYNTHETIC_SENSITIVE_VALUE' } } }]),
-      '$.result.value.rows[*] must not contain sensitive keys',
+      '$ must not contain sensitive keys',
       ['SYNTHETIC_SENSITIVE_VALUE', key],
+    )
+  })
+}
+
+const wholeResponseSensitiveCases = [
+  ['envelope credentials', 'cre-den_tials', (body, key, value) => { body[key] = value }],
+  ['result authorization', 'AuthoriZation', (body, key, value) => { body.result[key] = value }],
+  ['value secret key', 'secret_key', (body, key, value) => { body.result.value[key] = value }],
+  ['usage windowLabels client secret', 'Client Secret', (body, key, value) => { body.result.value.rows[0].windowLabels[key] = value }],
+  ['usage windowLabels password', 'pass-word', (body, key, value) => { body.result.value.rows[0].windowLabels[key] = value }],
+  ['usage windowLabels private key', 'private_key', (body, key, value) => { body.result.value.rows[0].windowLabels[key] = value }],
+  ['usage windowLabels session cookie', 'session.cookie', (body, key, value) => { body.result.value.rows[0].windowLabels[key] = value }],
+  ['usage windowLabels cookie', 'COOKIE', (body, key, value) => { body.result.value.rows[0].windowLabels[key] = value }],
+  ['balance tiers credentials', 'credentials', (body, key, value) => { body.result.value.rows[1].balanceTiers[key] = value }],
+  ['nested array access token', 'Access Token', (body, key, value) => { body.audit = [{ nested: [{ [key]: value }] }] }],
+  ['nested array refresh token', 'refresh-token', (body, key, value) => { body.result.audit = [[{ [key]: value }]] }],
+  ['nested array API key', 'api.key', (body, key, value) => { body.result.value.audit = [{ [key]: value }] }],
+  ['nested array endpoint', 'end_point', (body, key, value) => { body.result.value.rows[0].audit = [{ [key]: value }] }],
+]
+
+for (const [name, key, inject] of wholeResponseSensitiveCases) {
+  test(`validateSpecsResponse rejects ${name} anywhere in the body without echoing it`, () => {
+    const body = JSON.parse(response([
+      { ...usage, windowLabels: { ...usage.windowLabels } },
+      { ...balance, balanceTiers: { ...balance.balanceTiers } },
+    ]))
+    const value = `SYNTHETIC_${name.replaceAll(' ', '_').toUpperCase()}`
+    inject(body, key, value)
+    rejectsWithoutEcho(
+      JSON.stringify(body),
+      '$ must not contain sensitive keys',
+      [key, value],
     )
   })
 }

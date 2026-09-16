@@ -7,7 +7,26 @@ const COMMON_FIELDS = new Set(['id', 'label', 'kind', 'proxy'])
 const BALANCE_FIELDS = new Set([...COMMON_FIELDS, 'currency', 'balanceTiers'])
 const USAGE_FIELDS = new Set([...COMMON_FIELDS, 'windowLabels', 'warnPercent', 'errorPercent'])
 const INFO_FIELDS = COMMON_FIELDS
-const SENSITIVE_KEY = /^(?:credential|secret(?:credential)?|api(?:key)?|endpoint|authorization|(?:access|refresh|auth|bearer)?token)$/
+const SENSITIVE_KEYS = new Set([
+  'credential',
+  'credentials',
+  'secret',
+  'secretcredential',
+  'secretkey',
+  'clientsecret',
+  'apikey',
+  'endpoint',
+  'authorization',
+  'token',
+  'accesstoken',
+  'refreshtoken',
+  'authtoken',
+  'bearertoken',
+  'password',
+  'privatekey',
+  'cookie',
+  'sessioncookie',
+])
 
 function fail(message) {
   throw new TypeError(message)
@@ -20,7 +39,7 @@ function normalizedKey(key) {
 function hasSensitiveKey(value) {
   if (!value || typeof value !== 'object') return false
   for (const [key, child] of Object.entries(value)) {
-    if (SENSITIVE_KEY.test(normalizedKey(key)) || hasSensitiveKey(child)) return true
+    if (SENSITIVE_KEYS.has(normalizedKey(key)) || hasSensitiveKey(child)) return true
   }
   return false
 }
@@ -56,7 +75,6 @@ function validateUsage(row) {
 
 function validateRow(row) {
   if (!OBJECT(row)) fail('$.result.value.rows[*] must be an object')
-  if (hasSensitiveKey(row)) fail('$.result.value.rows[*] must not contain sensitive keys')
 
   const allowed = row.kind === 'balance'
     ? BALANCE_FIELDS
@@ -113,6 +131,7 @@ export function validateSpecsResponse(text, { rpcId, refreshMs }) {
     fail('$ must be valid JSON text')
   }
   if (!OBJECT(body)) fail('$ must be an object')
+  if (hasSensitiveKey(body)) fail('$ must not contain sensitive keys')
   if (body.type !== 'server-response') fail('$.type must be "server-response"')
   if (body.rpcId !== rpcId) fail('$.rpcId must match the expected rpcId')
   if (!OBJECT(body.result)) fail('$.result must be an object')
