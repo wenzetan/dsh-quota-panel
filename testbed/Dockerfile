@@ -6,6 +6,7 @@ FROM ${NODE_IMAGE}
 ARG DSH_VERSION=0.1.5-rc.1
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG APT_MIRROR=
+ARG APT_SECURITY_MIRROR=
 
 ENV DSH_VERSION=${DSH_VERSION} \
     DSH_HOME=/work/dsh-home \
@@ -13,9 +14,14 @@ ENV DSH_VERSION=${DSH_VERSION} \
     NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
 
 # curl 供探针使用；ca-certificates 供 HTTPS；git 供 pnpm 解析 git 依赖。
-# APT_MIRROR 非空时完整替换 sources 目录，不依赖 Debian 当前使用 .list 还是 .sources；
+# 两个 apt mirror 必须同时为空或同时非空；非空时完整替换 sources 目录，分别绑定主仓与 security 仓。
 # 安装结束（包括失败退出）都会恢复原目录，镜像层中只保留安装结果并清除 apt lists。
 RUN set -eu; \
+    if { [ -n "${APT_MIRROR}" ] && [ -z "${APT_SECURITY_MIRROR}" ]; } || \
+       { [ -z "${APT_MIRROR}" ] && [ -n "${APT_SECURITY_MIRROR}" ]; }; then \
+      echo >&2 'APT_MIRROR and APT_SECURITY_MIRROR must be configured together'; \
+      exit 2; \
+    fi; \
     restore_apt_sources() { \
       if [ -n "${APT_MIRROR}" ]; then \
         rm -rf /etc/apt/sources.list.d; \
@@ -38,8 +44,8 @@ RUN set -eu; \
       if [ -f /etc/apt/sources.list ]; then \
         mv /etc/apt/sources.list /tmp/testbed-sources.list; \
       fi; \
-      printf 'deb %s bookworm main\ndeb %s bookworm-updates main\ndeb %s-security bookworm-security main\n' \
-        "${APT_MIRROR}" "${APT_MIRROR}" "${APT_MIRROR}" \
+      printf 'deb %s bookworm main\ndeb %s bookworm-updates main\ndeb %s bookworm-security main\n' \
+        "${APT_MIRROR}" "${APT_MIRROR}" "${APT_SECURITY_MIRROR}" \
         > /etc/apt/sources.list.d/testbed-mirror.list; \
       trap restore_apt_sources EXIT HUP INT TERM; \
     fi; \

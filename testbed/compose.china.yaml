@@ -6,16 +6,17 @@ services:
   testbed:
     build:
       args:
-        NODE_IMAGE: "${NODE_IMAGE:-docker.m.daocloud.io/library/node:24-bookworm-slim}"
-        NPM_REGISTRY: "${NPM_REGISTRY:-https://registry.npmmirror.com}"
+        NODE_IMAGE: "${CHINA_NODE_IMAGE:-docker.m.daocloud.io/library/node:24-bookworm-slim}"
+        NPM_REGISTRY: "${CHINA_NPM_REGISTRY:-https://registry.npmmirror.com}"
         # slim 基础层尚无 CA bundle；默认 HTTP 由 apt 仓库签名校验，安装 CA 后可自行覆盖 HTTPS。
-        APT_MIRROR: "${APT_MIRROR:-http://mirrors.aliyun.com/debian}"
-        HTTP_PROXY: "${HTTP_PROXY:-}"
-        HTTPS_PROXY: "${HTTPS_PROXY:-}"
-        NO_PROXY: "${NO_PROXY:-}"
+        APT_MIRROR: "${CHINA_APT_MIRROR:-http://mirrors.aliyun.com/debian}"
+        APT_SECURITY_MIRROR: "${CHINA_APT_SECURITY_MIRROR:-http://mirrors.aliyun.com/debian-security}"
+        HTTP_PROXY: "${CHINA_HTTP_PROXY:-}"
+        HTTPS_PROXY: "${CHINA_HTTPS_PROXY:-}"
+        NO_PROXY: "${CHINA_NO_PROXY:-}"
     image: "dsh-testbed-quota-panel-china:${DSH_VERSION:-0.1.5-rc.1}"
     environment:
-      NPM_CONFIG_REGISTRY: "${NPM_REGISTRY:-https://registry.npmmirror.com}"
-      HTTP_PROXY: "${HTTP_PROXY:-}"
-      HTTPS_PROXY: "${HTTPS_PROXY:-}"
-      NO_PROXY: "${NO_PROXY:-}"
+      NPM_CONFIG_REGISTRY: "${CHINA_NPM_REGISTRY:-https://registry.npmmirror.com}"
+      HTTP_PROXY: "${CHINA_HTTP_PROXY:-}"
+      HTTPS_PROXY: "${CHINA_HTTPS_PROXY:-}"
+      NO_PROXY: "${CHINA_NO_PROXY:-}"
