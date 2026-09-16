@@ -1,5 +1,5 @@
-# testbed：单 service 模板。宿主 $DSH_HOME 与仓库源码都只读挂载；写入只落在
-# 容器可写层与命名卷。宿主 3080 被 GUI 占用，这里固定映射到 13080 起。
+# 全球官方基线：CI / GitHub reproduction 只加载本文件，不含中国镜像域名。
+# 宿主 $DSH_HOME 与仓库源码只读挂载；写入只落在容器可写层与命名卷。
 name: dsh-testbed-quota-panel
 
 services:
@@ -7,16 +7,25 @@ services:
     build:
       context: .
       args:
+        NODE_IMAGE: "${NODE_IMAGE:-node:24-bookworm-slim}"
         DSH_VERSION: "${DSH_VERSION:-0.1.5-rc.1}"
         NPM_REGISTRY: "${NPM_REGISTRY:-https://registry.npmjs.org}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
     image: "dsh-testbed-quota-panel:${DSH_VERSION:-0.1.5-rc.1}"
     environment:
       DSH_VERSION: "${DSH_VERSION:-0.1.5-rc.1}"
+      NPM_CONFIG_REGISTRY: "${NPM_REGISTRY:-https://registry.npmjs.org}"
       PROFILE_MODE: "${PROFILE_MODE:-minimal}"
       COMPANION: "${COMPANION:-}"
       GRID_LABEL: "${GRID_LABEL:-local}"
       STEPS: "${STEPS:-all}"
       PLUGIN_CHECK_DEPS: "${PLUGIN_CHECK_DEPS:-}"
+      HTTP_PROXY: "${HTTP_PROXY:-}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-}"
+      NO_PROXY: "${NO_PROXY:-}"
     volumes:
       - "${DSH_HOME_HOST:-/root/.dsh}:/host-dsh-home:ro"
       - "..:/plugin-src:ro"
