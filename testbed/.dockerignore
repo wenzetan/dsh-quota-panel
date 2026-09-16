@@ -1,0 +1,9 @@
+# Local state and secrets must never enter the image build context.
+.out/
+.env
+.env.*
+.docker-config/
+.empty/
+**/node_modules/
+*.log
+# tests/ and probes/ are intentional image inputs; do not exclude them.

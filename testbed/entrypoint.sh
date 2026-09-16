@@ -167,7 +167,32 @@ build_profile() {
 			dsh plugin --profile web add "$TARBALL"
 			;;
 		preserve)
-			die "PROFILE_MODE=preserve 尚未实现（见 Task 5）"
+			log profile "PROFILE_MODE=preserve：按名称重建宿主 bundle（不复制布局、不锁宿主版本）"
+			local host_manifest="${HOST_PROFILE_MANIFEST:-/host-dsh-home/profiles/web/package.json}"
+			local probes="$(dirname "${BASH_SOURCE[0]}")/probes"
+			local rows row rc
+			rows="$(node "$probes/preserve-seed.mjs" "$host_manifest")" \
+				|| die "preserve seed 失败：manifest 未通过校验，未开始安装"
+			mkdir -p "$STATE"
+			: > "$STATE/preserve-unrestored.txt"
+			if [ -n "$rows" ]; then
+				while IFS= read -r row; do
+					log profile "还原第三方行：$row"
+					if dsh plugin --profile web add "$row"; then
+						log profile "已还原：$row"
+					else
+						rc=$?
+						printf '%s\n' "$row" >> "$STATE/preserve-unrestored.txt"
+						log profile "警告：未恢复 $row（rc=$rc，依赖网络或上游包）"
+					fi
+				done <<< "$rows"
+			fi
+			if [ -s "$STATE/preserve-unrestored.txt" ]; then
+				log profile "部分恢复：未恢复项见 $STATE/preserve-unrestored.txt；不能视为完整恢复"
+			fi
+			log profile "最后安装本仓库 tarball（覆盖发行版行）"
+			dsh plugin --profile web add "$TARBALL" || die "preserve self tarball 安装失败"
+			log profile "仅验证装配层；未验证旧 npm/pnpm 布局混用或 L2"
 			;;
 		*)
 			die "未知 PROFILE_MODE：$PROFILE_MODE"

@@ -24,6 +24,7 @@ RUN npm install -g --no-audit --no-fund --registry="${NPM_REGISTRY}" \
 
 WORKDIR /work
 COPY entrypoint.sh /usr/local/bin/testbed-entrypoint
+COPY probes /usr/local/bin/probes
 # 对照测试与 fixture 一起进镜像：测试要 source 真正安装的 entrypoint，不能在容器里另写一份。
 COPY tests /usr/local/lib/testbed-tests
 RUN chmod +x /usr/local/bin/testbed-entrypoint /usr/local/lib/testbed-tests/test-dump-profile.sh \
