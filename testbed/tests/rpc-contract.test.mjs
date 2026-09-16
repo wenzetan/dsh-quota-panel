@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
 import {
+  bootPayloadFromHtml,
   clientUrlFromBootHtml,
   dynamicContract,
   redactLog,
@@ -184,6 +185,43 @@ for (const [name, row, message] of [
 ]) {
   test(`validateSpecsResponse checks ${name}`, () => {
     rejectsWithoutEcho(response([row]), message)
+  })
+}
+
+for (const [name, assignment] of [
+  ['window property', 'window.__DSH_BOOT__'],
+  ['globalThis bracket', 'globalThis["__DSH_BOOT__"]'],
+]) {
+  test(`bootPayloadFromHtml returns the parsed object from a real ${name} assignment`, () => {
+    const payload = {
+      rev: `graph-${name}`,
+      plugins: [{ id: 'dsh-quota-panel', url: `/plugins/??dsh-quota-panel/client.js&rev=${name}` }],
+    }
+    const html = `<script>${assignment} = ${JSON.stringify(payload)};</script>`
+
+    assert.deepEqual(bootPayloadFromHtml(html), payload)
+    assert.equal(clientUrlFromBootHtml(html), payload.plugins[0].url)
+  })
+}
+
+for (const [name, html, secret] of [
+  ['invalid JSON', '<script>window.__DSH_BOOT__={"note":"SYNTHETIC_INVALID_JSON",}</script>', 'SYNTHETIC_INVALID_JSON'],
+  ['an inert template', '<template><script>window.__DSH_BOOT__={"note":"SYNTHETIC_INERT_TEMPLATE"}</script></template>', 'SYNTHETIC_INERT_TEMPLATE'],
+  ['duplicate assignments', '<script>window.__DSH_BOOT__={"note":"SYNTHETIC_DUPLICATE_ONE"}</script><script>globalThis["__DSH_BOOT__"]={"note":"SYNTHETIC_DUPLICATE_TWO"}</script>', 'SYNTHETIC_DUPLICATE'],
+  ['a script src', '<script src="/SYNTHETIC_SRC.js">window.__DSH_BOOT__={"note":"SYNTHETIC_SRC_BODY"}</script>', 'SYNTHETIC_SRC'],
+  ['a non-JavaScript MIME', '<script type="application/json">window.__DSH_BOOT__={"note":"SYNTHETIC_MIME"}</script>', 'SYNTHETIC_MIME'],
+  ['a pseudo script tag', '< script>window.__DSH_BOOT__={"note":"SYNTHETIC_PSEUDO"}</script>', 'SYNTHETIC_PSEUDO'],
+  ['an invalid JSON backslash escape', String.raw`<script>window.__DSH_BOOT__={"note":"SYNTHETIC_BACKSLASH\q"}</script>`, 'SYNTHETIC_BACKSLASH'],
+]) {
+  test(`bootPayloadFromHtml fails closed on ${name} without echoing input`, () => {
+    assert.throws(
+      () => bootPayloadFromHtml(html),
+      error => {
+        assert.equal(error.message, 'boot HTML must contain exactly one valid DSH boot payload')
+        assert.doesNotMatch(error.message, new RegExp(secret))
+        return true
+      },
+    )
   })
 }
 

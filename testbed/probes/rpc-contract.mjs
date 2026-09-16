@@ -317,15 +317,24 @@ function quotaClientUrl(value) {
   return undefined
 }
 
-export function clientUrlFromBootHtml(html) {
+export function bootPayloadFromHtml(html) {
   requireString(html, 'boot HTML must be a string')
   const text = bootJsonText(html)
   if (text !== undefined) {
     try {
-      const url = quotaClientUrl(JSON.parse(text))
-      if (url !== undefined) return url
+      return JSON.parse(text)
     } catch {}
   }
+  fail('boot HTML must contain exactly one valid DSH boot payload')
+}
+
+export function clientUrlFromBootHtml(html) {
+  let payload
+  try {
+    payload = bootPayloadFromHtml(html)
+  } catch {}
+  const url = quotaClientUrl(payload)
+  if (url !== undefined) return url
   fail('boot HTML must advertise a revisioned dsh-quota-panel client URL')
 }
 
