@@ -1,0 +1,34 @@
+# testbed：单 service 模板。宿主 $DSH_HOME 与仓库源码都只读挂载；写入只落在
+# 容器可写层与命名卷。宿主 3080 被 GUI 占用，这里固定映射到 13080 起。
+name: dsh-testbed-quota-panel
+
+services:
+  testbed:
+    build:
+      context: .
+      args:
+        DSH_VERSION: "${DSH_VERSION:-0.1.5-rc.1}"
+        NPM_REGISTRY: "${NPM_REGISTRY:-https://registry.npmjs.org}"
+    image: "dsh-testbed-quota-panel:${DSH_VERSION:-0.1.5-rc.1}"
+    environment:
+      DSH_VERSION: "${DSH_VERSION:-0.1.5-rc.1}"
+      PROFILE_MODE: "${PROFILE_MODE:-minimal}"
+      COMPANION: "${COMPANION:-}"
+      GRID_LABEL: "${GRID_LABEL:-local}"
+      STEPS: "${STEPS:-all}"
+      PLUGIN_CHECK_DEPS: "${PLUGIN_CHECK_DEPS:-}"
+    volumes:
+      - "${DSH_HOME_HOST:-/root/.dsh}:/host-dsh-home:ro"
+      - "..:/plugin-src:ro"
+      - "${COMPANION_HOST_DIR:-./.empty}:/companion-src:ro"
+      - "npm-cache:/root/.npm"
+      - "pnpm-store:/root/.local/share/pnpm/store"
+    ports:
+      - "127.0.0.1:${HOST_PORT:-13080}:3080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    working_dir: /work
+
+volumes:
+  npm-cache:
+  pnpm-store:
