@@ -162,8 +162,8 @@ test('parseMountInfo decodes kernel octal escapes and keeps pre-separator option
   }])
 })
 
-test('assertMountReadonly accepts an exact ro token even when super options say rw', () => {
-  assert.deepEqual(assertMountReadonly(`${mountLine()}\n`, '/companion-src'), { readonly: true })
+test('assertMountReadonly accepts exactly one ro mode token even when super options say rw', () => {
+  assert.deepEqual(assertMountReadonly(`${mountLine({ options: 'nodev,ro,nosuid' })}\n`, '/companion-src'), { readonly: true })
 })
 
 test('assertMountReadonly uses the last exact matching record as the effective mount', () => {
@@ -187,9 +187,11 @@ test('assertMountReadonly matches a decoded target containing whitespace exactly
 })
 
 for (const [name, options] of [
-  ['rw', 'rw,nosuid'],
-  ['missing ro', 'nosuid,nodev'],
+  ['exactly rw', 'nodev,rw,nosuid'],
+  ['missing ro and rw', 'nosuid,nodev'],
   ['ro only inside another token', 'rw,errors=remount-ro'],
+  ['ro followed by rw', 'nodev,ro,rw'],
+  ['rw followed by ro', 'nodev,rw,ro'],
 ]) {
   test(`assertMountReadonly rejects ${name} mount options`, () => {
     rejectsFixed(
@@ -206,6 +208,22 @@ test('assertMountReadonly rejects a missing exact target without echoing mount d
     ['SYNTHETIC', 'SECRET'],
   )
 })
+
+for (const [name, text] of [
+  ['raw tab in root', mountLine({ root: '/SYNTHETIC\tROOT' })],
+  ['raw control in mount point', mountLine({ target: '/SYNTHETIC\u0001TARGET' })],
+  ['raw tab in mount options', mountLine({ options: 'ro,SYNTHETIC\tOPTION' })],
+  ['raw control in filesystem', mountLine({ filesystem: 'SYNTHETIC\u001fFS' })],
+  ['raw DEL in source', mountLine({ source: '/dev/SYNTHETIC\u007fSOURCE' })],
+]) {
+  test(`parseMountInfo rejects ${name} with a fixed non-echoing error`, () => {
+    rejectsFixed(
+      () => parseMountInfo(`${text}\n`),
+      'mountinfo must contain only valid records',
+      ['SYNTHETIC'],
+    )
+  })
+}
 
 for (const [name, text] of [
   ['empty input', ''],

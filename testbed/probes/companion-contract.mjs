@@ -123,14 +123,19 @@ const MOUNT_ESCAPE = Object.freeze({
 })
 
 function decodeMountField(field) {
-  if (typeof field !== 'string' || field.length === 0 || /\\(?!040|011|012|134)/.test(field)) {
+  if (typeof field !== 'string'
+    || field.length === 0
+    || /[\u0000-\u001f\u007f]/.test(field)
+    || /\\(?!040|011|012|134)/.test(field)) {
     fail('mountinfo must contain only valid records')
   }
   return field.replace(/\\(040|011|012|134)/g, (_match, octal) => MOUNT_ESCAPE[octal])
 }
 
 function mountOptions(field) {
-  if (!field || field.split(',').some(option => option.length === 0)) {
+  if (!field
+    || /[\u0000-\u001f\u007f]/.test(field)
+    || field.split(',').some(option => option.length === 0)) {
     fail('mountinfo must contain only valid records')
   }
   return field.split(',')
@@ -171,7 +176,8 @@ export function assertMountReadonly(text, target) {
   if (typeof target !== 'string' || target.length === 0) fail('mount target must be a nonempty string')
   const matches = parseMountInfo(text).filter(record => record.mountPoint === target)
   if (matches.length === 0) fail('mount target must be present')
-  if (!matches.at(-1).options.includes('ro')) fail('mount target must be read-only')
+  const modeOptions = matches.at(-1).options.filter(option => option === 'ro' || option === 'rw')
+  if (modeOptions.length !== 1 || modeOptions[0] !== 'ro') fail('mount target must be read-only')
   return { readonly: true }
 }
 
