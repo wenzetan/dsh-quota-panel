@@ -203,6 +203,34 @@ test('clientUrlFromBootHtml allows url before id and unrelated fields in the sam
   )
 })
 
+test('clientUrlFromBootHtml accepts a plain quota client path with a revision query', () => {
+  const html = '<script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/dsh-quota-panel/client.js?rev=quota-plain"}]}</script>'
+  assert.equal(
+    clientUrlFromBootHtml(html),
+    '/plugins/dsh-quota-panel/client.js?rev=quota-plain',
+  )
+})
+
+test('clientUrlFromBootHtml parses nested boot JSON and braces inside strings', () => {
+  const html = '<script>window.__DSH_BOOT__ = {"meta":{"note":"literal { braces } and \\"quoted\\" text"},"plugins":[{"url":"/plugins/??dsh-quota-panel/client.js&amp;rev=quota-44","details":{"nested":{"enabled":true}},"id":"dsh-quota-panel"}]};</script>'
+  assert.equal(
+    clientUrlFromBootHtml(html),
+    '/plugins/??dsh-quota-panel/client.js&rev=quota-44',
+  )
+})
+
+test('clientUrlFromBootHtml rejects a quota record pointing at another plugin without echoing HTML', () => {
+  const html = '<script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??other/client.js&amp;rev=SYNTHETIC_BAD_REV"}]}</script>'
+  assert.throws(
+    () => clientUrlFromBootHtml(html),
+    error => {
+      assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+      assert.doesNotMatch(error.message, /other|SYNTHETIC_BAD_REV/)
+      return true
+    },
+  )
+})
+
 test('clientUrlFromBootHtml rejects a missing quota client URL without echoing HTML', () => {
   const html = '<html>SYNTHETIC_BOOT_CONTENT</html>'
   assert.throws(

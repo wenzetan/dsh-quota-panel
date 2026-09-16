@@ -145,14 +145,58 @@ export function validateSpecsResponse(text, { rpcId, refreshMs }) {
   return { rows: body.result.value.rows, refreshMs: body.result.value.refreshMs }
 }
 
+function bootJsonText(html) {
+  const marker = /window\.__DSH_BOOT__\s*=\s*/g
+  let match
+  while ((match = marker.exec(html)) !== null) {
+    const start = match.index + match[0].length
+    if (html[start] !== '{' && html[start] !== '[') continue
+    const stack = []
+    let quote = ''
+    let escaped = false
+    for (let index = start; index < html.length; index += 1) {
+      const character = html[index]
+      if (quote) {
+        if (escaped) escaped = false
+        else if (character === '\\') escaped = true
+        else if (character === quote) quote = ''
+        continue
+      }
+      if (character === '"' || character === "'") {
+        quote = character
+      } else if (character === '{' || character === '[') {
+        stack.push(character)
+      } else if (character === '}' || character === ']') {
+        const opening = stack.pop()
+        if ((opening === '{' && character !== '}') || (opening === '[' && character !== ']')) break
+        if (stack.length === 0) return html.slice(start, index + 1)
+      }
+    }
+  }
+  return undefined
+}
+
+function quotaClientUrl(value) {
+  if (!value || typeof value !== 'object') return undefined
+  if (value.id === 'dsh-quota-panel' && typeof value.url === 'string') {
+    const url = value.url.replace(/&amp;/gi, '&')
+    if (/^\/plugins\/(?:\?\?)?dsh-quota-panel\/client\.js(?:[?&]|$)/.test(url) && /[?&]rev=[^&#]+/.test(url)) return url
+  }
+  for (const child of Object.values(value)) {
+    const found = quotaClientUrl(child)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
 export function clientUrlFromBootHtml(html) {
   requireString(html, 'boot HTML must be a string')
-  for (const objectText of html.match(/\{[^{}]*\}/g) ?? []) {
-    if (!/["']id["']\s*:\s*["']dsh-quota-panel["']/.test(objectText)) continue
-    const match = /["']url["']\s*:\s*["']([^"']+)["']/.exec(objectText)
-    if (!match) continue
-    const url = match[1].replace(/&amp;/gi, '&')
-    if (/^\/plugins\/.*client\.js(?:[?&]|$)/.test(url) && /[?&]rev=[^&#]+/.test(url)) return url
+  const text = bootJsonText(html)
+  if (text !== undefined) {
+    try {
+      const url = quotaClientUrl(JSON.parse(text))
+      if (url !== undefined) return url
+    } catch {}
   }
   fail('boot HTML must advertise a revisioned dsh-quota-panel client URL')
 }
