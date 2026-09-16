@@ -12,6 +12,8 @@ import {
   comboClientUrlsFromBootHtml,
   parseMountInfo,
   parsePackJson,
+  validateComboResponses,
+  validatePeerResponse,
   validateTarPackage,
 } from '../probes/companion-contract.mjs'
 
@@ -32,7 +34,7 @@ const EXPECTED_CONTRACT = {
       expect: {
         type: 'server-response',
         rpcId: 'combo-self',
-        result: { ok: true, value: { rows: 'array' } },
+        result: { ok: true, value: { rows: 'array', refreshMs: 60000 } },
       },
     },
   },
@@ -265,6 +267,116 @@ test('clients CLI rejects invalid HTML without echoing it', () => {
   assert.equal(result.stdout, '')
   assert.equal(result.stderr, 'companion-contract: combo boot must advertise exactly two valid client URLs\n')
   assert.doesNotMatch(result.stderr, /SYNTHETIC_CLIENT_HTML/)
+})
+
+const peerResponse = (overrides = {}) => JSON.stringify({
+  type: 'server-response',
+  rpcId: 'combo-peer',
+  result: {
+    ok: false,
+    error: {
+      code: 'internal',
+      message: 'llm-newapi: unknown endpoint ci-probe',
+      details: {},
+      ...overrides.error,
+    },
+    ...overrides.result,
+  },
+  ...overrides.envelope,
+})
+const quotaResponse = (rows = [], rpcId = 'combo-self') => JSON.stringify({
+  type: 'server-response', rpcId, result: { ok: true, value: { rows, refreshMs: 60000 } },
+})
+
+test('validatePeerResponse accepts the exact expected peer error and returns a safe summary', () => {
+  assert.deepEqual(validatePeerResponse(peerResponse()), { errorCode: 'internal' })
+})
+
+for (const [name, text] of [
+  ['bad JSON', '{"marker":"SYNTHETIC_BAD_JSON",'],
+  ['non-object', '[]'],
+  ['wrong type', peerResponse({ envelope: { type: 'SYNTHETIC_TYPE' } })],
+  ['wrong rpcId', peerResponse({ envelope: { rpcId: 'SYNTHETIC_RPC' } })],
+  ['non-object result', JSON.stringify({ type: 'server-response', rpcId: 'combo-peer', result: 'SYNTHETIC_RESULT' })],
+  ['ok true', peerResponse({ result: { ok: true } })],
+  ['non-object error', peerResponse({ result: { error: 'SYNTHETIC_ERROR' } })],
+  ['wrong code', peerResponse({ error: { code: 'SYNTHETIC_CODE' } })],
+  ['wrong message', peerResponse({ error: { message: 'SYNTHETIC_MESSAGE' } })],
+  ['non-object details', peerResponse({ error: { details: 'SYNTHETIC_DETAILS' } })],
+  ['nonempty details', peerResponse({ error: { details: { hidden: 'SYNTHETIC_DETAILS' } } })],
+]) {
+  test(`validatePeerResponse rejects ${name} without echoing the body`, () => {
+    rejectsFixed(() => validatePeerResponse(text), 'peer response must match the expected ci-probe error', ['SYNTHETIC'])
+  })
+}
+
+test('validateComboResponses accepts empty and real quota rows with the peer response', () => {
+  assert.deepEqual(validateComboResponses(quotaResponse(), peerResponse()), {
+    quotaRows: 0,
+    peerErrorCode: 'internal',
+  })
+  const row = { id: 'info', label: 'Info', kind: 'info', proxy: null }
+  assert.deepEqual(validateComboResponses(quotaResponse([row]), peerResponse()), {
+    quotaRows: 1,
+    peerErrorCode: 'internal',
+  })
+})
+
+test('validateComboResponses consumes a custom contract with distinct IDs and refresh semantics', () => {
+  const contract = structuredClone(COMBO_CONTRACT)
+  contract.self.rpc.request.rpcId = 'custom-self'
+  contract.self.rpc.expect.rpcId = 'custom-self'
+  contract.self.rpc.expect.result.value.refreshMs = 60000
+  contract.peer.rpc.request.rpcId = 'custom-peer'
+  contract.peer.rpc.expect.rpcId = 'custom-peer'
+  const peer = JSON.parse(peerResponse())
+  peer.rpcId = 'custom-peer'
+  assert.deepEqual(validateComboResponses(quotaResponse([], 'custom-self'), JSON.stringify(peer), contract), {
+    quotaRows: 0,
+    peerErrorCode: 'internal',
+  })
+})
+
+for (const [name, quota, peer, mutate] of [
+  ['swapped bodies', peerResponse(), quotaResponse()],
+  ['bad quota', '{"marker":"SYNTHETIC_QUOTA",', peerResponse()],
+  ['bad peer', quotaResponse(), '{"marker":"SYNTHETIC_PEER",'],
+  ['same rpcIds', quotaResponse(), peerResponse(), contract => {
+    contract.peer.rpc.request.rpcId = contract.self.rpc.request.rpcId
+    contract.peer.rpc.expect.rpcId = contract.self.rpc.expect.rpcId
+  }],
+  ['self request/expect rpcId mismatch', quotaResponse(), peerResponse(), contract => { contract.self.rpc.request.rpcId = 'SYNTHETIC_SELF_REQUEST' }],
+  ['peer request/expect rpcId mismatch', quotaResponse(), peerResponse(), contract => { contract.peer.rpc.request.rpcId = 'SYNTHETIC_PEER_REQUEST' }],
+]) {
+  test(`validateComboResponses rejects ${name} with one fixed non-echoing error`, () => {
+    const contract = structuredClone(COMBO_CONTRACT)
+    contract.self.rpc.expect.result.value.refreshMs = 60000
+    mutate?.(contract)
+    rejectsFixed(
+      () => validateComboResponses(quota, peer, contract),
+      'combo responses must match the validated contract',
+      ['SYNTHETIC'],
+    )
+  })
+}
+
+test('peer-response CLI accepts a file and stdin with an optional rpcId', t => {
+  const body = JSON.parse(peerResponse())
+  body.rpcId = 'custom-peer'
+  const text = JSON.stringify(body)
+  const files = tempFiles(t, { peer: text })
+  for (const [path, input] of [[files.peer, undefined], ['-', text]]) {
+    const result = cli(['peer-response', path, 'custom-peer'], input)
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(JSON.parse(result.stdout), { errorCode: 'internal' })
+  }
+})
+
+test('combo-responses CLI validates quota and peer files', t => {
+  const files = tempFiles(t, { quota: quotaResponse(), peer: peerResponse() })
+  const result = cli(['combo-responses', files.quota, files.peer])
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout), { quotaRows: 0, peerErrorCode: 'internal' })
 })
 
 test('parseMountInfo decodes kernel octal escapes and keeps pre-separator options', () => {
@@ -531,7 +643,7 @@ test('tar CLI accepts metadata from stdin', t => {
 })
 
 test('CLI rejects unknown commands and extra arguments with one fixed usage line', () => {
-  const expected = 'companion-contract: usage: companion-contract.mjs contract | clients <html-file|-> | mount-readonly <mountinfo-file|-> <target> | pack <pack-json-file|-> | tar <metadata-json-file|-> <members-json-file> <pack-json-file>\n'
+  const expected = 'companion-contract: usage: companion-contract.mjs contract | clients <html-file|-> | peer-response <body-file|-> [rpcId] | combo-responses <quota-file|-> <peer-file> | mount-readonly <mountinfo-file|-> <target> | pack <pack-json-file|-> | tar <metadata-json-file|-> <members-json-file> <pack-json-file>\n'
   for (const args of [[], ['SYNTHETIC_COMMAND'], ['contract', 'SYNTHETIC_EXTRA'], ['pack']]) {
     const result = cli(args)
     assert.equal(result.status, 1)

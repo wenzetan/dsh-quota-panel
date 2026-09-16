@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { bootPayloadFromHtml } from './rpc-contract.mjs'
+import { bootPayloadFromHtml, validateSpecsResponse } from './rpc-contract.mjs'
 
 const OBJECT = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const PEER_NAME = 'dsh-llm-newapi'
 const PEER_VERSION = '0.8.6-rc.3'
 const CLIENT_MEMBER = 'package/lib/client.js'
-const USAGE = 'usage: companion-contract.mjs contract | clients <html-file|-> | mount-readonly <mountinfo-file|-> <target> | pack <pack-json-file|-> | tar <metadata-json-file|-> <members-json-file> <pack-json-file>'
+const USAGE = 'usage: companion-contract.mjs contract | clients <html-file|-> | peer-response <body-file|-> [rpcId] | combo-responses <quota-file|-> <peer-file> | mount-readonly <mountinfo-file|-> <target> | pack <pack-json-file|-> | tar <metadata-json-file|-> <members-json-file> <pack-json-file>'
 
 function fail(message) {
   throw new TypeError(message)
@@ -38,6 +38,7 @@ function validateContract(contract) {
     [contract.self.rpc?.expect?.rpcId, 'combo-self'],
     [contract.self.rpc?.expect?.result?.ok, true],
     [contract.self.rpc?.expect?.result?.value?.rows, 'array'],
+    [contract.self.rpc?.expect?.result?.value?.refreshMs, 60000],
     [contract.peer.package?.name, PEER_NAME],
     [contract.peer.package?.version, PEER_VERSION],
     [contract.peer.clientId, PEER_NAME],
@@ -86,7 +87,7 @@ export const COMBO_CONTRACT = deepFreeze(validateContract({
       expect: {
         type: 'server-response',
         rpcId: 'combo-self',
-        result: { ok: true, value: { rows: 'array' } },
+        result: { ok: true, value: { rows: 'array', refreshMs: 60000 } },
       },
     },
   },
@@ -170,6 +171,55 @@ export function comboClientUrlsFromBootHtml(html, contract = COMBO_CONTRACT) {
     result.push({ id: row.id, url })
   }
   return result
+}
+
+export function validatePeerResponse(text, { rpcId = COMBO_CONTRACT.peer.rpc.expect.rpcId } = {}) {
+  let body
+  try {
+    body = JSON.parse(text)
+  } catch {
+    fail('peer response must match the expected ci-probe error')
+  }
+  const error = body?.result?.error
+  if (!OBJECT(body)
+    || body.type !== 'server-response'
+    || body.rpcId !== rpcId
+    || !OBJECT(body.result)
+    || body.result.ok !== false
+    || !OBJECT(error)
+    || error.code !== 'internal'
+    || error.message !== 'llm-newapi: unknown endpoint ci-probe'
+    || !OBJECT(error.details)
+    || Object.keys(error.details).length !== 0) {
+    fail('peer response must match the expected ci-probe error')
+  }
+  return { errorCode: 'internal' }
+}
+
+function comboResponseContract(contract) {
+  if (!OBJECT(contract) || !OBJECT(contract.self) || !OBJECT(contract.peer)) return undefined
+  const selfRpcId = contract.self.rpc?.expect?.rpcId
+  const peerRpcId = contract.peer.rpc?.expect?.rpcId
+  const refreshMs = contract.self.rpc?.expect?.result?.value?.refreshMs
+  if (typeof selfRpcId !== 'string' || selfRpcId.length === 0
+    || contract.self.rpc?.request?.rpcId !== selfRpcId
+    || typeof peerRpcId !== 'string' || peerRpcId.length === 0
+    || contract.peer.rpc?.request?.rpcId !== peerRpcId
+    || selfRpcId === peerRpcId
+    || typeof refreshMs !== 'number' || !Number.isFinite(refreshMs)) return undefined
+  return { selfRpcId, peerRpcId, refreshMs }
+}
+
+export function validateComboResponses(quotaText, peerText, contract = COMBO_CONTRACT) {
+  const expected = comboResponseContract(contract)
+  if (expected === undefined) fail('combo responses must match the validated contract')
+  try {
+    const quota = validateSpecsResponse(quotaText, { rpcId: expected.selfRpcId, refreshMs: expected.refreshMs })
+    const peer = validatePeerResponse(peerText, { rpcId: expected.peerRpcId })
+    return { quotaRows: quota.rows.length, peerErrorCode: peer.errorCode }
+  } catch {
+    fail('combo responses must match the validated contract')
+  }
 }
 
 const MOUNT_ESCAPE = Object.freeze({
@@ -323,6 +373,15 @@ async function runCli(argv) {
   }
   if (command === 'clients' && args.length === 1) {
     process.stdout.write(`${JSON.stringify(comboClientUrlsFromBootHtml(readInput(args[0])))}\n`)
+    return
+  }
+  if (command === 'peer-response' && (args.length === 1 || args.length === 2)) {
+    const options = args.length === 2 ? { rpcId: args[1] } : undefined
+    process.stdout.write(`${JSON.stringify(validatePeerResponse(readInput(args[0]), options))}\n`)
+    return
+  }
+  if (command === 'combo-responses' && args.length === 2) {
+    process.stdout.write(`${JSON.stringify(validateComboResponses(readInput(args[0]), readInput(args[1])))}\n`)
     return
   }
   if (command === 'mount-readonly' && args.length === 2) {
