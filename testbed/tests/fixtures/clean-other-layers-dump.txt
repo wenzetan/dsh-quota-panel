@@ -1,0 +1,7 @@
+# 干净的组合树：dsh 桩正常退出、stderr 无诊断，只有别的层，没有本插件行。
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: standard
+- id: ui-settings
+  name: '@deepseek-ai/dsh-client-ui-settings'

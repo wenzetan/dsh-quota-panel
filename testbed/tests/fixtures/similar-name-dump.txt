@@ -1,0 +1,15 @@
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: standard
+# == dsh-quota-panel-companion
+- id: quota-panel-companion
+  name: dsh-quota-panel-companion
+  config:
+    refreshMs: 60000
+    providers: []
+- id: quota-panel
+  name: dsh-quota-panel-community-fork
+  config:
+    refreshMs: 60000
+    providers: []

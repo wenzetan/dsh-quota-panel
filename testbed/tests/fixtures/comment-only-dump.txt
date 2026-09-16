@@ -1,0 +1,8 @@
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: standard
+# == dsh-quota-panel
+# 本层被剥掉了 bundles 行，因此只留下这条注释头，组合树里没有任何插件行。
+- id: ui-settings
+  name: '@deepseek-ai/dsh-client-ui-settings'

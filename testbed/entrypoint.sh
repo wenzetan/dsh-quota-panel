@@ -177,13 +177,72 @@ build_profile() {
 	register_bundle_rows dsh-quota-panel
 }
 
+# 从 `dsh --dump-config` 的 stdout 里精确判定"目标插件行"是否存在。
+#
+# 宿主 dump 规范（dsh 0.1.5-rc.1 对 --dump-config 的实测输出，见 tests/fixtures/real-dump-sample.txt）：
+#   组合树是 YAML 列表，插件行形如
+#     - id: quota-panel
+#       name: dsh-quota-panel          <- name 恰好缩进 2 空格、裸值、行尾无内容
+#   并在该层插入处带一行注释头 `# == <包名>`。注释头与 `name:` 值都可能只是别的层/
+#   别的包的影子（base 层被 patch 时 section 头是 `# == <base>, patched by <plugin>`，
+#   同名前缀的包也会有同样的 `- id:`/`name:` 行），因此只按"整份文本含子串"判绿会被
+#   注释头、相似包名（dsh-quota-panel-companion）和 dsh 自身诊断骗过。
+#
+# 这里按行判定：先记住最近一个 `- id:` 列表项（"这是一行"的结构锚点），再要求随后的
+# name 行与目标包名逐字相等。返回 0 命中 / 1 未命中（结构不符也归为未命中——本函数只
+# 回答"这一行在不在"，dump 命令本身的失败由调用点单独判定）。
+assert_plugin_row() {
+	awk -v want="$2" '
+		function finish() { exit found ? 0 : 1 }
+		/^-[[:space:]]+id:/ { last_id_line = NR; next }
+		/^[[:space:]]*#/ { next }
+		/^[[:space:]]*name:/ {
+			if (last_id_line) {
+				value = $0
+				sub(/^[[:space:]]*name:[[:space:]]*/, "", value)
+				sub(/[[:space:]]+$/, "", value)
+				if (value == want) found = 1
+			}
+			next
+		}
+		END { finish() }
+	' "$1"
+}
+
 # 装配断言：组合树里必须出现本插件行。
+#
+# stderr 刻意单独落盘（不再 `2>&1`）：dsh 的 warning/进度都可能提到包名，混进 dump 后
+# 会让下面的判定读到并不属于组合树的行。失败时两份文件都留给排查。
 dump_profile() {
-	dsh --profile web --dump-config > /work/dump-config.txt 2>&1 \
-		|| die "dsh --dump-config 失败，见 /work/dump-config.txt"
-	grep -q "dsh-quota-panel" /work/dump-config.txt \
-		|| die "组合树中没有 dsh-quota-panel 行（patch 层未生效）"
+	local rc
+	# 落盘路径可覆盖（默认就是容器里的 /work/dump-config.txt）：对照测试在宿主直接
+	# source 本文件跑时，把 --dump-config 的输出写进临时目录，无需 Docker。
+	local dump="${DUMP_CONFIG_PATH:-/work/dump-config.txt}"
+	local dump_err="${DUMP_STDERR_PATH:-/work/dump-config.stderr.txt}"
+	# dsh 的失败必须放在 if 条件里捕获：本脚本是 `set -euo pipefail`，
+	# 裸的失败命令会在 `rc=$?` 之前就把 shell 收摊（表现为只有 [done]、没有 [fail] 报文）。
+	if dsh --profile web --dump-config > "$dump" 2> "$dump_err"; then
+		rc=0
+	else
+		rc=$?
+	fi
+	[ "$rc" -eq 0 ] \
+		|| die "dsh --dump-config 失败（rc=$rc），见 $dump 与 $dump_err"
+	# 同理：断言的非零返回是"判定结果"而不是脚本错误，必须由 if 捕获而不是让它触发 set -e。
+	if assert_plugin_row "$dump" dsh-quota-panel; then
+		:
+	else
+		die "组合树中没有 dsh-quota-panel 行（patch 层未生效）"
+	fi
 	log profile "装配断言通过：组合树包含 dsh-quota-panel"
+}
+
+# 可选：装卸配断言的对照测试（测试脚本与 fixture 由镜像打进 /usr/local/lib/testbed-tests，
+# 它 source 的就是本 entrypoint，不会另写一份 grep）。
+run_dump_profile_tests() {
+	log test "dump_profile 对照测试（真实样本正例 + 注释/相似名/诊断/空/失败负例）"
+	/usr/local/bin/testbed-test-dump-profile
+	log test "对照测试全部通过"
 }
 
 main() {
@@ -196,6 +255,7 @@ main() {
 	want stage && stage_sources
 	want l1 && run_l1
 	want l1 && run_plugin_check
+	want test && run_dump_profile_tests
 	want pack && pack_plugin
 	want profile && build_profile
 	want profile && dump_profile
