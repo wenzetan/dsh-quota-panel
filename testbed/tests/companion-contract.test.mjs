@@ -322,6 +322,17 @@ test('validateComboResponses accepts empty and real quota rows with the peer res
   })
 })
 
+test('validateComboResponses rejects a custom contract and body that agree on noncanonical refreshMs', () => {
+  const contract = structuredClone(COMBO_CONTRACT)
+  contract.self.rpc.expect.result.value.refreshMs = 1
+  const quota = JSON.parse(quotaResponse())
+  quota.result.value.refreshMs = 1
+  rejectsFixed(
+    () => validateComboResponses(JSON.stringify(quota), peerResponse(), contract),
+    'combo responses must match the validated contract',
+  )
+})
+
 test('validateComboResponses consumes a custom contract with distinct IDs and refresh semantics', () => {
   const contract = structuredClone(COMBO_CONTRACT)
   contract.self.rpc.request.rpcId = 'custom-self'

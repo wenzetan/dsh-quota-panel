@@ -206,7 +206,7 @@ function comboResponseContract(contract) {
     || typeof peerRpcId !== 'string' || peerRpcId.length === 0
     || contract.peer.rpc?.request?.rpcId !== peerRpcId
     || selfRpcId === peerRpcId
-    || typeof refreshMs !== 'number' || !Number.isFinite(refreshMs)) return undefined
+    || refreshMs !== 60000) return undefined
   return { selfRpcId, peerRpcId, refreshMs }
 }
 
