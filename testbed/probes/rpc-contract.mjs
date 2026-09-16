@@ -172,10 +172,43 @@ function balancedJsonEnd(text, start) {
   return undefined
 }
 
+function scriptAttributes(text) {
+  const result = new Map()
+  let index = 0
+  while (index < text.length) {
+    while (/\s/.test(text[index] ?? '')) index += 1
+    if (index >= text.length) break
+    const nameStart = index
+    while (index < text.length && !/[\s=/>]/.test(text[index])) index += 1
+    if (index === nameStart) return undefined
+    const name = text.slice(nameStart, index).toLowerCase()
+    while (/\s/.test(text[index] ?? '')) index += 1
+    let value = ''
+    if (text[index] === '=') {
+      index += 1
+      while (/\s/.test(text[index] ?? '')) index += 1
+      const quote = text[index] === '"' || text[index] === "'" ? text[index++] : ''
+      const valueStart = index
+      if (quote) {
+        while (index < text.length && text[index] !== quote) index += 1
+        if (index >= text.length) return undefined
+        value = text.slice(valueStart, index)
+        index += 1
+      } else {
+        while (index < text.length && !/[\s>]/.test(text[index])) index += 1
+        value = text.slice(valueStart, index)
+      }
+    }
+    result.set(name, value)
+  }
+  return result
+}
+
 function executableScriptAttributes(attributes) {
-  const typeMatch = /(?:^|\s)type\s*=\s*(?:(["'])(.*?)\1|([^\s>]+))/i.exec(attributes)
-  if (!typeMatch) return true
-  const type = (typeMatch[2] ?? typeMatch[3]).trim().toLowerCase()
+  const parsed = scriptAttributes(attributes)
+  if (parsed === undefined || parsed.has('src')) return false
+  if (!parsed.has('type')) return true
+  const type = parsed.get('type').trim().toLowerCase()
   return type === 'module' || /^(?:text|application)\/(?:javascript|ecmascript)$/.test(type)
 }
 

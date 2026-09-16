@@ -281,6 +281,40 @@ for (const [name, html] of [
   })
 }
 
+for (const [name, attributes] of [
+  ['double-quoted src', 'src="/external.js"'],
+  ['single-quoted src', "src='/external.js'"],
+  ['unquoted src', 'src=/external.js'],
+  ['ASCII-case-insensitive src', 'SrC = "/external.js"'],
+  ['tab-spaced src', 'nonce="safe"\tSRC\t=\t/external.js defer'],
+]) {
+  test(`clientUrlFromBootHtml rejects inline boot body on script with ${name}`, () => {
+    const html = `<script ${attributes}>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=SYNTHETIC_SRC_REV"}]}</script>`
+    assert.throws(
+      () => clientUrlFromBootHtml(html),
+      error => {
+        assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+        assert.doesNotMatch(error.message, /external|SYNTHETIC_SRC_REV/)
+        return true
+      },
+    )
+  })
+}
+
+for (const [name, attributes, rev] of [
+  ['data-src', 'data-src="/metadata.js"', 'data-src'],
+  ['srcdoc', 'srcdoc="metadata"', 'srcdoc'],
+  ['nonce/defer/async', 'nonce="safe" defer async', 'flags'],
+  ['double-quoted data attribute value containing src', 'data-note="safe src marker"', 'data-value-src'],
+  ['single-quoted title value containing src', "title='safe src marker'", 'title-value-src'],
+  ['nonce value containing src', 'nonce="safe src marker" defer', 'nonce-value-src'],
+]) {
+  test(`clientUrlFromBootHtml does not confuse ${name} with exact src`, () => {
+    const html = `<script ${attributes}>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=${rev}"}]}</script>`
+    assert.equal(clientUrlFromBootHtml(html), `/plugins/??dsh-quota-panel/client.js&rev=${rev}`)
+  })
+}
+
 test('clientUrlFromBootHtml accepts an executable script with nonce and JavaScript MIME', () => {
   const html = '<script nonce="safe" defer type="text/javascript">globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=typed"}]}</script>'
   assert.equal(clientUrlFromBootHtml(html), '/plugins/??dsh-quota-panel/client.js&rev=typed')
