@@ -104,9 +104,10 @@ test('validateSpecsResponse accepts an empty rows array', () => {
   })
 })
 
-test('validateSpecsResponse accepts balance and usage rows including URL strings', () => {
-  assert.deepEqual(validateSpecsResponse(response([balance, usage]), options), {
-    rows: [balance, usage],
+test('validateSpecsResponse accepts balance, usage, and info rows including URL strings', () => {
+  const info = { id: 'quota-info', label: 'Quota info', kind: 'info', proxy: null }
+  assert.deepEqual(validateSpecsResponse(response([balance, usage, info]), options), {
+    rows: [balance, usage, info],
     refreshMs: 60000,
   })
 })
@@ -191,6 +192,14 @@ test('clientUrlFromBootHtml extracts the revisioned quota client URL and decodes
   assert.equal(
     clientUrlFromBootHtml(html),
     '/plugins/??dsh-quota-panel/client.js&rev=quota-42',
+  )
+})
+
+test('clientUrlFromBootHtml allows url before id and unrelated fields in the same object', () => {
+  const html = '<script>window.__DSH_BOOT__={"plugins":[{"url":"/plugins/??wrong/client.js&amp;rev=wrong","id":"other"},{"url":"/plugins/??dsh-quota-panel/client.js&amp;rev=quota-43","platform":"web","enabled":true,"id":"dsh-quota-panel"}]}</script>'
+  assert.equal(
+    clientUrlFromBootHtml(html),
+    '/plugins/??dsh-quota-panel/client.js&rev=quota-43',
   )
 })
 

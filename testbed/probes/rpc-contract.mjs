@@ -147,13 +147,14 @@ export function validateSpecsResponse(text, { rpcId, refreshMs }) {
 
 export function clientUrlFromBootHtml(html) {
   requireString(html, 'boot HTML must be a string')
-  const match = /["']id["']\s*:\s*["']dsh-quota-panel["']\s*,\s*["']url["']\s*:\s*["']([^"']+)["']/.exec(html)
-  if (!match) fail('boot HTML must advertise a revisioned dsh-quota-panel client URL')
-  const url = match[1].replace(/&amp;/gi, '&')
-  if (!/^\/plugins\/.*client\.js(?:[?&]|$)/.test(url) || !/[?&]rev=[^&#]+/.test(url)) {
-    fail('boot HTML must advertise a revisioned dsh-quota-panel client URL')
+  for (const objectText of html.match(/\{[^{}]*\}/g) ?? []) {
+    if (!/["']id["']\s*:\s*["']dsh-quota-panel["']/.test(objectText)) continue
+    const match = /["']url["']\s*:\s*["']([^"']+)["']/.exec(objectText)
+    if (!match) continue
+    const url = match[1].replace(/&amp;/gi, '&')
+    if (/^\/plugins\/.*client\.js(?:[?&]|$)/.test(url) && /[?&]rev=[^&#]+/.test(url)) return url
   }
-  return url
+  fail('boot HTML must advertise a revisioned dsh-quota-panel client URL')
 }
 
 export function redactLog(text) {
