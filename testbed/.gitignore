@@ -1,0 +1,6 @@
+# testbed 运行产物与本地配置
+.out/
+.env
+# 忽略 docker CLI 状态目录内容，但保留占位文件（否则同一步无法提交它）
+.docker-config/*
+!.docker-config/.gitkeep
