@@ -212,27 +212,83 @@ function executableScriptAttributes(attributes) {
   return type === 'module' || /^(?:text|application)\/(?:javascript|ecmascript)$/.test(type)
 }
 
-function bootJsonText(html) {
-  const marker = /(?:window\.__DSH_BOOT__|globalThis\[(["'])__DSH_BOOT__\1\])\s*=\s*/g
-  const matches = [...html.matchAll(marker)]
-  if (matches.length !== 1) return undefined
-  const match = matches[0]
-  const script = /<script(\s[^>]*)?>([\s\S]*?)<\/script\s*>/gi
-  let scriptMatch
-  while ((scriptMatch = script.exec(html)) !== null) {
-    if (!executableScriptAttributes(scriptMatch[1] ?? '')) continue
-    const body = scriptMatch[2]
-    const bodyStart = scriptMatch.index + scriptMatch[0].indexOf(body)
-    const markerStart = match.index
-    if (markerStart < bodyStart || markerStart >= bodyStart + body.length) continue
-    const relativeStart = markerStart - bodyStart
-    if (body.slice(0, relativeStart).trim() !== '') return undefined
-    const jsonStart = relativeStart + match[0].length
-    const jsonEnd = balancedJsonEnd(body, jsonStart)
-    if (jsonEnd === undefined || !/^\s*;?\s*$/.test(body.slice(jsonEnd))) return undefined
-    return body.slice(jsonStart, jsonEnd)
+function htmlTagEnd(html, start) {
+  let quote = ''
+  for (let index = start + 1; index < html.length; index += 1) {
+    const character = html[index]
+    if (quote) {
+      if (character === quote) quote = ''
+    } else if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === '>') {
+      return index
+    }
   }
   return undefined
+}
+
+function executableScriptBodies(html) {
+  const bodies = []
+  let index = 0
+  let templateDepth = 0
+  while (index < html.length) {
+    if (html.startsWith('<!--', index)) {
+      const end = html.indexOf('-->', index + 4)
+      if (end === -1) return undefined
+      index = end + 3
+      continue
+    }
+    if (html[index] !== '<') {
+      index += 1
+      continue
+    }
+
+    const tagEnd = htmlTagEnd(html, index)
+    if (tagEnd === undefined) return undefined
+    const tag = html.slice(index + 1, tagEnd).match(/^\s*(\/?)\s*([a-z][a-z0-9:-]*)/i)
+    if (tag === null) {
+      index = tagEnd + 1
+      continue
+    }
+    const closing = tag[1] === '/'
+    const name = tag[2].toLowerCase()
+
+    if (!closing && name === 'script') {
+      const close = /<\/script\s*>/gi
+      close.lastIndex = tagEnd + 1
+      const closeMatch = close.exec(html)
+      if (closeMatch === null) return undefined
+      if (templateDepth === 0) {
+        const attributes = html.slice(index + 1 + tag[0].length, tagEnd)
+        if (executableScriptAttributes(attributes)) {
+          bodies.push(html.slice(tagEnd + 1, closeMatch.index))
+        }
+      }
+      index = close.lastIndex
+      continue
+    }
+
+    if (name === 'template') {
+      if (closing) templateDepth = Math.max(0, templateDepth - 1)
+      else templateDepth += 1
+    }
+    index = tagEnd + 1
+  }
+  return bodies
+}
+
+function bootJsonText(html) {
+  const bodies = executableScriptBodies(html)
+  if (bodies === undefined) return undefined
+  const marker = /(?:window\.__DSH_BOOT__|globalThis\[(["'])__DSH_BOOT__\1\])\s*=\s*/g
+  const matches = bodies.flatMap(body => [...body.matchAll(marker)].map(match => ({ body, match })))
+  if (matches.length !== 1) return undefined
+  const { body, match } = matches[0]
+  if (body.slice(0, match.index).trim() !== '') return undefined
+  const jsonStart = match.index + match[0].length
+  const jsonEnd = balancedJsonEnd(body, jsonStart)
+  if (jsonEnd === undefined || !/^\s*;?\s*$/.test(body.slice(jsonEnd))) return undefined
+  return body.slice(jsonStart, jsonEnd)
 }
 
 function quotaClientObjects(value, found = []) {
@@ -246,7 +302,16 @@ function quotaClientUrl(value) {
   const candidates = quotaClientObjects(value)
   if (candidates.length !== 1 || typeof candidates[0].url !== 'string') return undefined
   const url = candidates[0].url.replace(/&amp;/gi, '&')
-  if (/^\/plugins\/(?:\?\?)?dsh-quota-panel\/client\.js(?:[?&]|$)/.test(url) && /[?&]rev=[^&#]+/.test(url)) return url
+  if (!url.startsWith('/') || url.startsWith('//')) return undefined
+  let parsed
+  try {
+    parsed = new URL(url, 'http://127.0.0.1')
+  } catch {
+    return undefined
+  }
+  const exactClient = parsed.pathname === '/plugins/dsh-quota-panel/client.js'
+  const exactComboClient = parsed.pathname === '/plugins/' && parsed.search.startsWith('??dsh-quota-panel/client.js&')
+  if ((exactClient || exactComboClient) && parsed.searchParams.get('rev')) return url
   return undefined
 }
 

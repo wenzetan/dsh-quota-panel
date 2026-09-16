@@ -219,6 +219,40 @@ test('clientUrlFromBootHtml accepts a plain quota client path with a revision qu
   )
 })
 
+test('clientUrlFromBootHtml rejects a revision found only in the URL fragment without echoing it', () => {
+  const html = '<script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/dsh-quota-panel/client.js?x=1#fragment?rev=SYNTHETIC_FRAGMENT_REV"}]}</script>'
+  assert.throws(
+    () => clientUrlFromBootHtml(html),
+    error => {
+      assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+      assert.doesNotMatch(error.message, /SYNTHETIC_FRAGMENT_REV/)
+      return true
+    },
+  )
+})
+
+test('clientUrlFromBootHtml rejects ampersand revision text embedded in a plain pathname', () => {
+  const html = '<script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/dsh-quota-panel/client.js&rev=SYNTHETIC_PATH_REV"}]}</script>'
+  assert.throws(
+    () => clientUrlFromBootHtml(html),
+    error => {
+      assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+      assert.doesNotMatch(error.message, /SYNTHETIC_PATH_REV/)
+      return true
+    },
+  )
+})
+
+for (const [name, url] of [
+  ['combo path', '/plugins/??dsh-quota-panel/client.js&rev=quota-combo#fragment?rev=decoy'],
+  ['plain path', '/plugins/dsh-quota-panel/client.js?x=1&rev=quota-plain#fragment'],
+]) {
+  test(`clientUrlFromBootHtml accepts a real revision in the ${name} request portion before a fragment`, () => {
+    const html = `<script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"${url}"}]}</script>`
+    assert.equal(clientUrlFromBootHtml(html), url)
+  })
+}
+
 test('clientUrlFromBootHtml parses nested boot JSON and braces inside strings', () => {
   const html = '<script>window.__DSH_BOOT__ = {"meta":{"note":"literal { braces } and \\"quoted\\" text"},"plugins":[{"url":"/plugins/??dsh-quota-panel/client.js&amp;rev=quota-44","details":{"nested":{"enabled":true}},"id":"dsh-quota-panel"}]};</script>'
   assert.equal(
@@ -227,14 +261,44 @@ test('clientUrlFromBootHtml parses nested boot JSON and braces inside strings', 
   )
 })
 
+test('clientUrlFromBootHtml rejects a script found only inside an HTML comment without echoing it', () => {
+  const html = '<!-- <script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=SYNTHETIC_COMMENT_REV"}]}</script> -->'
+  assert.throws(
+    () => clientUrlFromBootHtml(html),
+    error => {
+      assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+      assert.doesNotMatch(error.message, /SYNTHETIC_COMMENT_REV/)
+      return true
+    },
+  )
+})
+
+test('clientUrlFromBootHtml rejects a script nested inside quoted and nested templates without echoing it', () => {
+  const html = '<template data-note="quoted > value"><section><TeMpLaTe id=\'nested\'><ScRiPt>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=SYNTHETIC_TEMPLATE_REV"}]}</sCrIpT></tEmPlAtE></section></template>'
+  assert.throws(
+    () => clientUrlFromBootHtml(html),
+    error => {
+      assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+      assert.doesNotMatch(error.message, /SYNTHETIC_TEMPLATE_REV/)
+      return true
+    },
+  )
+})
+
+test('clientUrlFromBootHtml ignores comment and template decoys when one executable assignment exists', () => {
+  const html = '<!-- <script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=comment-decoy"}]}</script> --><template data-note="quoted > value"><template><script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=template-decoy"}]}</script></template></template><script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=executable"}]}</script>'
+  assert.equal(clientUrlFromBootHtml(html), '/plugins/??dsh-quota-panel/client.js&rev=executable')
+})
+
+test('clientUrlFromBootHtml does not treat HTML comment markers inside executable script JSON as markup', () => {
+  const html = '<script>window.__DSH_BOOT__={"meta":{"note":"literal <!-- marker --> text"},"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=comment-string"}]}</script>'
+  assert.equal(clientUrlFromBootHtml(html), '/plugins/??dsh-quota-panel/client.js&rev=comment-string')
+})
+
 for (const [name, html] of [
   [
     'duplicate assignments',
     '<script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=first"}]}</script><script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=second"}]}</script>',
-  ],
-  [
-    'a comment decoy before a valid assignment',
-    '<!-- window.__DSH_BOOT__={"plugins":[]} --><script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=real"}]}</script>',
   ],
   [
     'a string decoy before a valid assignment',

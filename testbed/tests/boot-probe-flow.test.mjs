@@ -212,6 +212,14 @@ function assertStoppedAndReaped(result) {
   assertSensitiveFilesRemoved(result)
 }
 
+function assertMissingTokenFailure(output) {
+  const diagnostic = output.split(/\r?\n/).filter(line => /\[fail\]/.test(line)).find(line => (
+    (/token/i.test(line) && /未取得/.test(line)) ||
+    (/(?:截止时间|deadline)/i.test(line) && /(?:等待|耗尽)/.test(line) && /启动\s*token/i.test(line))
+  ))
+  assert.ok(diagnostic, `missing-token failure must report unavailable startup token on one fail line: ${output}`)
+}
+
 function helperModes(result) {
   return readIfPresent(result.helperTrace).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)[0])
 }
@@ -299,15 +307,32 @@ test('auth redirect must stay on the expected loopback home origin', t => {
   assertStoppedAndReaped(result)
 })
 
+test('missing-token diagnostic helper binds semantics to a fail line', async t => {
+  for (const output of [
+    '[testbed][test-version][stub-flow][l2] [fail] 截止时间内未取得启动 token\ndiagnostic token = [REDACTED]\n',
+    '[testbed][test-version][stub-flow][l2] [fail] 全流程截止时间耗尽（等待启动 token）\ndiagnostic token = [REDACTED]\n',
+  ]) {
+    await t.test(`accepts ${JSON.stringify(output.split('\n')[0])}`, () => {
+      assert.doesNotThrow(() => assertMissingTokenFailure(output))
+    })
+  }
+
+  for (const output of [
+    '[testbed][test-version][stub-flow][l2] [fail] 全流程截止时间耗尽（等待首页）\ndiagnostic token = [REDACTED]\n',
+    '[testbed][test-version][stub-flow][l2] [fail] 全流程截止时间耗尽（读取 specs route）\ndiagnostic token = [REDACTED]\n',
+    'diagnostic token = [REDACTED]\n',
+  ]) {
+    await t.test(`rejects ${JSON.stringify(output.split('\n')[0])}`, () => {
+      assert.throws(() => assertMissingTokenFailure(output))
+    })
+  }
+})
+
 test('missing startup token and missing session cookie both fail closed', async t => {
   await t.test('token is mandatory', t => {
     const result = runProbe(t, 'missing-token')
     assert.notEqual(result.status, 0, result.output)
-    assert.match(result.output, /token/i)
-    assert.ok(
-      /未取得/.test(result.output) || (/(?:截止时间|deadline)/i.test(result.output) && /(?:等待|耗尽)/.test(result.output)),
-      `missing-token failure must report unavailable token or exhausted waiting deadline: ${result.output}`,
-    )
+    assertMissingTokenFailure(result.output)
     assert.match(result.output, /token\s*=\s*\[REDACTED\]/i)
     assert.doesNotMatch(result.output, new RegExp(`${syntheticToken}|${syntheticLogToken}`))
     assertStoppedAndReaped(result)
