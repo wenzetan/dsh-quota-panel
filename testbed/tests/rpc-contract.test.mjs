@@ -227,6 +227,70 @@ test('clientUrlFromBootHtml parses nested boot JSON and braces inside strings', 
   )
 })
 
+for (const [name, html] of [
+  [
+    'duplicate assignments',
+    '<script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=first"}]}</script><script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=second"}]}</script>',
+  ],
+  [
+    'a comment decoy before a valid assignment',
+    '<!-- window.__DSH_BOOT__={"plugins":[]} --><script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=real"}]}</script>',
+  ],
+  [
+    'a string decoy before a valid assignment',
+    '<script>const decoy = "window.__DSH_BOOT__={}"</script><script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=real"}]}</script>',
+  ],
+  [
+    'a malformed anchored assignment before a valid assignment',
+    '<script>window.__DSH_BOOT__={"plugins":[}</script><script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=real"}]}</script>',
+  ],
+  [
+    'extra script statements around the assignment',
+    '<script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=real"}]};globalThis.extra=true</script>',
+  ],
+  [
+    'a non-executable application/json script',
+    '<script type="application/json">globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=real"}]}</script>',
+  ],
+  [
+    'a non-executable text/plain script',
+    '<script nonce="safe" type="text/plain">globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=real"}]}</script>',
+  ],
+  [
+    'an unquoted non-executable script type',
+    '<script type=application/json>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=real"}]}</script>',
+  ],
+  [
+    'duplicate quota plugin ids',
+    '<script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=one"},{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=two"}]}</script>',
+  ],
+  [
+    'a valid quota client plus a duplicate invalid quota id',
+    '<script>globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=one"},{"id":"dsh-quota-panel","url":"/plugins/??other/client.js&rev=two"}]}</script>',
+  ],
+]) {
+  test(`clientUrlFromBootHtml fails closed on ${name}`, () => {
+    assert.throws(
+      () => clientUrlFromBootHtml(html),
+      error => {
+        assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+        assert.doesNotMatch(error.message, /first|second|real/)
+        return true
+      },
+    )
+  })
+}
+
+test('clientUrlFromBootHtml accepts an executable script with nonce and JavaScript MIME', () => {
+  const html = '<script nonce="safe" defer type="text/javascript">globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=typed"}]}</script>'
+  assert.equal(clientUrlFromBootHtml(html), '/plugins/??dsh-quota-panel/client.js&rev=typed')
+})
+
+test('clientUrlFromBootHtml accepts an executable module script', () => {
+  const html = '<script type="module">globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=module"}]}</script>'
+  assert.equal(clientUrlFromBootHtml(html), '/plugins/??dsh-quota-panel/client.js&rev=module')
+})
+
 test('clientUrlFromBootHtml rejects a quota record pointing at another plugin without echoing HTML', () => {
   const html = '<script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??other/client.js&amp;rev=SYNTHETIC_BAD_REV"}]}</script>'
   assert.throws(

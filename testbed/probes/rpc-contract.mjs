@@ -146,50 +146,74 @@ export function validateSpecsResponse(text, { rpcId, refreshMs }) {
   return { rows: body.result.value.rows, refreshMs: body.result.value.refreshMs }
 }
 
-function bootJsonText(html) {
-  const markers = [
-    /window\.__DSH_BOOT__\s*=\s*/g,
-    /globalThis\[(["'])__DSH_BOOT__\1\]\s*=\s*/g,
-  ]
-  let match
-  for (const marker of markers) while ((match = marker.exec(html)) !== null) {
-    const start = match.index + match[0].length
-    if (html[start] !== '{' && html[start] !== '[') continue
-    const stack = []
-    let quote = ''
-    let escaped = false
-    for (let index = start; index < html.length; index += 1) {
-      const character = html[index]
-      if (quote) {
-        if (escaped) escaped = false
-        else if (character === '\\') escaped = true
-        else if (character === quote) quote = ''
-        continue
-      }
-      if (character === '"' || character === "'") {
-        quote = character
-      } else if (character === '{' || character === '[') {
-        stack.push(character)
-      } else if (character === '}' || character === ']') {
-        const opening = stack.pop()
-        if ((opening === '{' && character !== '}') || (opening === '[' && character !== ']')) break
-        if (stack.length === 0) return html.slice(start, index + 1)
-      }
+function balancedJsonEnd(text, start) {
+  if (text[start] !== '{' && text[start] !== '[') return undefined
+  const stack = []
+  let quote = ''
+  let escaped = false
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index]
+    if (quote) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === quote) quote = ''
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === '{' || character === '[') {
+      stack.push(character)
+    } else if (character === '}' || character === ']') {
+      const opening = stack.pop()
+      if ((opening === '{' && character !== '}') || (opening === '[' && character !== ']')) return undefined
+      if (stack.length === 0) return index + 1
     }
   }
   return undefined
 }
 
+function executableScriptAttributes(attributes) {
+  const typeMatch = /(?:^|\s)type\s*=\s*(?:(["'])(.*?)\1|([^\s>]+))/i.exec(attributes)
+  if (!typeMatch) return true
+  const type = (typeMatch[2] ?? typeMatch[3]).trim().toLowerCase()
+  return type === 'module' || /^(?:text|application)\/(?:javascript|ecmascript)$/.test(type)
+}
+
+function bootJsonText(html) {
+  const marker = /(?:window\.__DSH_BOOT__|globalThis\[(["'])__DSH_BOOT__\1\])\s*=\s*/g
+  const matches = [...html.matchAll(marker)]
+  if (matches.length !== 1) return undefined
+  const match = matches[0]
+  const script = /<script(\s[^>]*)?>([\s\S]*?)<\/script\s*>/gi
+  let scriptMatch
+  while ((scriptMatch = script.exec(html)) !== null) {
+    if (!executableScriptAttributes(scriptMatch[1] ?? '')) continue
+    const body = scriptMatch[2]
+    const bodyStart = scriptMatch.index + scriptMatch[0].indexOf(body)
+    const markerStart = match.index
+    if (markerStart < bodyStart || markerStart >= bodyStart + body.length) continue
+    const relativeStart = markerStart - bodyStart
+    if (body.slice(0, relativeStart).trim() !== '') return undefined
+    const jsonStart = relativeStart + match[0].length
+    const jsonEnd = balancedJsonEnd(body, jsonStart)
+    if (jsonEnd === undefined || !/^\s*;?\s*$/.test(body.slice(jsonEnd))) return undefined
+    return body.slice(jsonStart, jsonEnd)
+  }
+  return undefined
+}
+
+function quotaClientObjects(value, found = []) {
+  if (!value || typeof value !== 'object') return found
+  if (value.id === 'dsh-quota-panel') found.push(value)
+  for (const child of Object.values(value)) quotaClientObjects(child, found)
+  return found
+}
+
 function quotaClientUrl(value) {
-  if (!value || typeof value !== 'object') return undefined
-  if (value.id === 'dsh-quota-panel' && typeof value.url === 'string') {
-    const url = value.url.replace(/&amp;/gi, '&')
-    if (/^\/plugins\/(?:\?\?)?dsh-quota-panel\/client\.js(?:[?&]|$)/.test(url) && /[?&]rev=[^&#]+/.test(url)) return url
-  }
-  for (const child of Object.values(value)) {
-    const found = quotaClientUrl(child)
-    if (found !== undefined) return found
-  }
+  const candidates = quotaClientObjects(value)
+  if (candidates.length !== 1 || typeof candidates[0].url !== 'string') return undefined
+  const url = candidates[0].url.replace(/&amp;/gi, '&')
+  if (/^\/plugins\/(?:\?\?)?dsh-quota-panel\/client\.js(?:[?&]|$)/.test(url) && /[?&]rev=[^&#]+/.test(url)) return url
   return undefined
 }
 
@@ -213,7 +237,8 @@ export function redactLog(text) {
 async function runCli(argv) {
   const [command, ...args] = argv
   if (command === 'contract' && args.length === 1) {
-    process.stdout.write(`${JSON.stringify(await dynamicContract(args[0]))}\n`)
+    const { route, method } = await dynamicContract(args[0])
+    process.stdout.write(`${JSON.stringify({ route, method })}\n`)
     return
   }
   if (command === 'client-url' && args.length === 1) {
