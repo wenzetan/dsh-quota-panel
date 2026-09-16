@@ -199,7 +199,7 @@ function scriptAttributes(text) {
         value = text.slice(valueStart, index)
       }
     }
-    result.set(name, value)
+    if (!result.has(name)) result.set(name, value)
   }
   return result
 }

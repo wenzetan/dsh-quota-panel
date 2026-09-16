@@ -315,6 +315,23 @@ for (const [name, attributes, rev] of [
   })
 }
 
+test('clientUrlFromBootHtml preserves first duplicate type when non-executable comes first', () => {
+  const html = '<script type="application/json" TYPE="module">globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=SYNTHETIC_DUPLICATE_TYPE"}]}</script>'
+  assert.throws(
+    () => clientUrlFromBootHtml(html),
+    error => {
+      assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+      assert.doesNotMatch(error.message, /SYNTHETIC_DUPLICATE_TYPE/)
+      return true
+    },
+  )
+})
+
+test('clientUrlFromBootHtml preserves first duplicate type when executable comes first', () => {
+  const html = '<script TYPE="module" type="application/json">globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=first-type"}]}</script>'
+  assert.equal(clientUrlFromBootHtml(html), '/plugins/??dsh-quota-panel/client.js&rev=first-type')
+})
+
 test('clientUrlFromBootHtml accepts an executable script with nonce and JavaScript MIME', () => {
   const html = '<script nonce="safe" defer type="text/javascript">globalThis["__DSH_BOOT__"]={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=typed"}]}</script>'
   assert.equal(clientUrlFromBootHtml(html), '/plugins/??dsh-quota-panel/client.js&rev=typed')
