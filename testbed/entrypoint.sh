@@ -49,12 +49,19 @@ assert_readonly() {
 seed_home() {
 	rm -rf "$STATE"
 	mkdir -p "$STATE"
+	# 逐项显式失败关闭：`[ -e src ] && cp src dst` 里的 cp 位于 && 的非末位，
+	# set -e 对它失效——源不可读 / 磁盘满时复制会失败而函数照样报"就绪"、脚本 rc=0。
+	# 若恰是 .credentials.yaml 复制失败，后面的凭据分支还会被静默跳过，
+	# 下游 L2 便拿到残缺的 DSH_HOME 却显示成功。这里改成白名单项缺席不算错、
+	# 但复制本身失败一律 die。
 	local f d
 	for f in settings.yaml .credentials.yaml pet.json; do
-		[ -e "/host-dsh-home/$f" ] && cp -a "/host-dsh-home/$f" "$STATE/$f"
+		[ -e "/host-dsh-home/$f" ] || continue
+		cp -a "/host-dsh-home/$f" "$STATE/$f" || die "播种失败：无法复制 $f"
 	done
 	for d in skills storages; do
-		[ -d "/host-dsh-home/$d" ] && cp -a "/host-dsh-home/$d" "$STATE/$d"
+		[ -d "/host-dsh-home/$d" ] || continue
+		cp -a "/host-dsh-home/$d" "$STATE/$d" || die "播种失败：无法复制 $d/"
 	done
 	if [ -e "$STATE/.credentials.yaml" ]; then
 		# 本仓库 CI 的 boot job 记录过这个门禁：credentials-local 拒绝 owner 之外
@@ -67,6 +74,58 @@ seed_home() {
 	log seed "DSH_HOME 就绪：$STATE"
 }
 
+# 复制源码时必须排除 node_modules（27 MB）、.tmp-*（本仓库的缓存/试验目录，实测约 136 MB）
+# 与 .worktrees；刻意不复制 .git：因此产物新鲜度检查不能用 git diff，改用内容哈希。
+stage_sources() {
+	rm -rf /work/plugin
+	mkdir -p /work/plugin
+	tar -C /plugin-src \
+		--exclude=./node_modules --exclude=./.git --exclude='./.tmp-*' --exclude=./.worktrees \
+		-cf - . | tar -C /work/plugin -xf -
+	[ -f /work/plugin/package.json ] || die "源码暂存失败：/work/plugin/package.json 不存在"
+	log stage "源码已暂存：/work/plugin"
+}
+
+lib_digest() {
+	find lib -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
+}
+
+run_l1() {
+	cd /work/plugin
+	log l1 "npm ci"
+	npm ci --no-audit --no-fund
+	local before after
+	before="$(lib_digest)"
+	log l1 "build（tsc → lib/ + vendored runtime 复制）"
+	npm run build
+	after="$(lib_digest)"
+	if [ "$before" != "$after" ]; then
+		die "lib/ 与全新构建不一致：产物过期，请在本地 npm run build 后提交重建的 lib/（等价于 CI 的 committed lib/ matches a fresh build）"
+	fi
+	log l1 "产物新鲜度：lib/ 内容哈希与全新构建一致"
+	log l1 "双面脚本（Part A 宿主半边 + Part B 浏览器半边 vm 沙箱）"
+	local out
+	out="$(node scripts/test-page-script.mjs 2>&1)" || {
+		printf '%s\n' "$out" | tail -40
+		die "test-page-script.mjs 非零退出"
+	}
+	printf '%s\n' "$out" | tail -5
+	if printf '%s\n' "$out" | grep -q '^FAIL:'; then
+		printf '%s\n' "$out" | grep '^FAIL:' >&2
+		die "双面脚本出现 FAIL 行"
+	fi
+	log l1 "全部通过"
+}
+
+# 可选：插件规范检查（需要 PLUGIN_CHECK_DEPS 指向含 dsh-plugin-check 的目录）
+run_plugin_check() {
+	[ -n "$PLUGIN_CHECK_DEPS" ] || { log l1 "跳过 plugin-check（未提供 PLUGIN_CHECK_DEPS）"; return 0; }
+	cd /work/plugin
+	log l1 "plugin-check（@deepseek-ai/dsh-plugin-check，strict）"
+	node scripts/plugin-check.mjs
+	log l1 "plugin-check 通过"
+}
+
 main() {
 	if [ "${1:-}" = "--check-image" ]; then
 		check_image
@@ -74,6 +133,9 @@ main() {
 	fi
 	want assert && assert_readonly
 	want seed && seed_home
+	want stage && stage_sources
+	want l1 && run_l1
+	want l1 && run_plugin_check
 	log done "所选步骤完成：STEPS=${STEPS}"
 }
 
