@@ -329,6 +329,7 @@ export function bootPayloadFromHtml(html) {
 }
 
 export function clientUrlFromBootHtml(html) {
+  requireString(html, 'boot HTML must be a string')
   let payload
   try {
     payload = bootPayloadFromHtml(html)

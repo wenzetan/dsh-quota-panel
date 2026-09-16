@@ -545,6 +545,18 @@ test('clientUrlFromBootHtml rejects a quota record pointing at another plugin wi
   )
 })
 
+test('clientUrlFromBootHtml preserves its fixed non-string input diagnostic without echoing values', () => {
+  const input = { secret: 'SYNTHETIC_NON_STRING_BOOT_SECRET' }
+  assert.throws(
+    () => clientUrlFromBootHtml(input),
+    error => {
+      assert.equal(error.message, 'boot HTML must be a string')
+      assert.doesNotMatch(error.message, /SYNTHETIC_NON_STRING_BOOT_SECRET/)
+      return true
+    },
+  )
+})
+
 test('clientUrlFromBootHtml rejects a missing quota client URL without echoing HTML', () => {
   const html = '<html>SYNTHETIC_BOOT_CONTENT</html>'
   assert.throws(
