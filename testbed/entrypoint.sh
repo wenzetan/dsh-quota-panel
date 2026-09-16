@@ -49,11 +49,17 @@ assert_readonly() {
 seed_home() {
 	rm -rf "$STATE"
 	mkdir -p "$STATE"
-	# 逐项显式失败关闭：`[ -e src ] && cp src dst` 里的 cp 位于 && 的非末位，
-	# set -e 对它失效——源不可读 / 磁盘满时复制会失败而函数照样报"就绪"、脚本 rc=0。
-	# 若恰是 .credentials.yaml 复制失败，后面的凭据分支还会被静默跳过，
-	# 下游 L2 便拿到残缺的 DSH_HOME 却显示成功。这里改成白名单项缺席不算错、
-	# 但复制本身失败一律 die。
+	# 宿主目录本身必须可读且可搜索：否则下面每个白名单项的 `[ -e ]` / `[ -d ]`
+	# 都为假而全部静默 continue，函数仍会打印"DSH_HOME 就绪"并 rc=0——下游拿到的
+	# 是一份空 DSH_HOME 却显示成功（例如宿主目录 mode 0700 而 compose 设了 user:）。
+	# 白名单项**缺席**仍不算错，只有"宿主目录不可用"才 die。
+	[ -r /host-dsh-home ] && [ -x /host-dsh-home ] \
+		|| die "播种失败：/host-dsh-home 不可读或不可搜索（挂载/权限有问题）"
+	# 逐项显式失败关闭。实测（见 task-3-report §3.3a）：旧写法
+	# `[ -e src ] && cp src dst` 在 cp 失败时其实是 rc=1——`set -e` 恰恰作用于
+	# `&&` 列表的末位命令；但它只留下 cp 的裸报错，失败原因要靠读报错猜，且一旦
+	# 该列表结构被改动（例如 cp 被挪进 `||` 分支或列表变长）就会退化为静默通过。
+	# 显式 `|| die` 让失败路径与列表位置无关，并自带"是哪一项没复制成"的诊断。
 	local f d
 	for f in settings.yaml .credentials.yaml pet.json; do
 		[ -e "/host-dsh-home/$f" ] || continue
