@@ -245,7 +245,7 @@ function executableScriptBodies(html) {
 
     const tagEnd = htmlTagEnd(html, index)
     if (tagEnd === undefined) return undefined
-    const tag = html.slice(index + 1, tagEnd).match(/^\s*(\/?)\s*([a-z][a-z0-9:-]*)/i)
+    const tag = html.slice(index + 1, tagEnd).match(/^(\/?)([a-z][a-z0-9:-]*)/i)
     if (tag === null) {
       index = tagEnd + 1
       continue
@@ -302,13 +302,15 @@ function quotaClientUrl(value) {
   const candidates = quotaClientObjects(value)
   if (candidates.length !== 1 || typeof candidates[0].url !== 'string') return undefined
   const url = candidates[0].url.replace(/&amp;/gi, '&')
-  if (!url.startsWith('/') || url.startsWith('//')) return undefined
+  const loopbackBase = 'http://127.0.0.1'
+  if (!url.startsWith('/') || url.startsWith('//') || url.includes('\\')) return undefined
   let parsed
   try {
-    parsed = new URL(url, 'http://127.0.0.1')
+    parsed = new URL(url, loopbackBase)
   } catch {
     return undefined
   }
+  if (parsed.origin !== loopbackBase) return undefined
   const exactClient = parsed.pathname === '/plugins/dsh-quota-panel/client.js'
   const exactComboClient = parsed.pathname === '/plugins/' && parsed.search.startsWith('??dsh-quota-panel/client.js&')
   if ((exactClient || exactComboClient) && parsed.searchParams.get('rev')) return url

@@ -219,6 +219,54 @@ test('clientUrlFromBootHtml accepts a plain quota client path with a revision qu
   )
 })
 
+test('clientUrlFromBootHtml rejects a backslash authority URL whose parsed origin is cross-origin', () => {
+  const url = '/\\evil.invalid/plugins/dsh-quota-panel/client.js?rev=SYNTHETIC_CROSS_ORIGIN'
+  assert.equal(new URL(url, 'http://127.0.0.1').origin, 'http://evil.invalid')
+  const html = `<script>window.__DSH_BOOT__=${JSON.stringify({ plugins: [{ id: 'dsh-quota-panel', url }] })}</script>`
+  assert.throws(
+    () => clientUrlFromBootHtml(html),
+    error => {
+      assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+      assert.doesNotMatch(error.message, /evil|SYNTHETIC_CROSS_ORIGIN/)
+      return true
+    },
+  )
+})
+
+for (const [name, url] of [
+  ['mixed slash authority', '/\\/evil.invalid/plugins/dsh-quota-panel/client.js?rev=SYNTHETIC_BACKSLASH_MIXED'],
+  ['repeated backslash authority', '/\\\\evil.invalid/plugins/dsh-quota-panel/client.js?rev=SYNTHETIC_BACKSLASH_REPEATED'],
+  ['backslash authority and path separators', '/\\evil.invalid\\plugins\\dsh-quota-panel\\client.js?rev=SYNTHETIC_BACKSLASH_NORMALIZED'],
+  ['combo authority delimiter', '/\\evil.invalid/plugins/??dsh-quota-panel/client.js&rev=SYNTHETIC_BACKSLASH_COMBO'],
+]) {
+  test(`clientUrlFromBootHtml rejects cross-origin ${name} normalization without echoing the URL`, () => {
+    assert.notEqual(new URL(url, 'http://127.0.0.1').origin, 'http://127.0.0.1')
+    const html = `<script>window.__DSH_BOOT__=${JSON.stringify({ plugins: [{ id: 'dsh-quota-panel', url }] })}</script>`
+    assert.throws(
+      () => clientUrlFromBootHtml(html),
+      error => {
+        assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+        assert.doesNotMatch(error.message, /evil|SYNTHETIC_BACKSLASH/i)
+        return true
+      },
+    )
+  })
+}
+
+test('clientUrlFromBootHtml rejects a same-origin path backslash before URL normalization', () => {
+  const url = '/plugins\\dsh-quota-panel/client.js?rev=SYNTHETIC_BACKSLASH_PATH'
+  assert.equal(new URL(url, 'http://127.0.0.1').origin, 'http://127.0.0.1')
+  const html = `<script>window.__DSH_BOOT__=${JSON.stringify({ plugins: [{ id: 'dsh-quota-panel', url }] })}</script>`
+  assert.throws(
+    () => clientUrlFromBootHtml(html),
+    error => {
+      assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+      assert.doesNotMatch(error.message, /SYNTHETIC_BACKSLASH_PATH/)
+      return true
+    },
+  )
+})
+
 test('clientUrlFromBootHtml rejects a revision found only in the URL fragment without echoing it', () => {
   const html = '<script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/dsh-quota-panel/client.js?x=1#fragment?rev=SYNTHETIC_FRAGMENT_REV"}]}</script>'
   assert.throws(
@@ -283,6 +331,47 @@ test('clientUrlFromBootHtml rejects a script nested inside quoted and nested tem
       return true
     },
   )
+})
+
+for (const [name, opening] of [
+  ['space', '< script>'],
+  ['tab', '<\tscript>'],
+]) {
+  test(`clientUrlFromBootHtml does not execute a script pseudo-tag with ${name} after less-than`, () => {
+    const rev = `SYNTHETIC_PSEUDO_OPEN_${name.toUpperCase()}`
+    const html = `${opening}window.__DSH_BOOT__=${JSON.stringify({ plugins: [{ id: 'dsh-quota-panel', url: `/plugins/??dsh-quota-panel/client.js&rev=${rev}` }] })}</script>`
+    assert.throws(
+      () => clientUrlFromBootHtml(html),
+      error => {
+        assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+        assert.doesNotMatch(error.message, /SYNTHETIC_PSEUDO_OPEN/)
+        return true
+      },
+    )
+  })
+}
+
+for (const [name, closing] of [
+  ['space', '</ template>'],
+  ['tab', '</\ttemplate>'],
+]) {
+  test(`clientUrlFromBootHtml keeps scripts inert after a template pseudo-close with ${name} after slash`, () => {
+    const rev = `SYNTHETIC_PSEUDO_CLOSE_${name.toUpperCase()}`
+    const html = `<template data-note="quoted > value">${closing}<ScRiPt nonce="quoted > value">window.__DSH_BOOT__=${JSON.stringify({ plugins: [{ id: 'dsh-quota-panel', url: `/plugins/??dsh-quota-panel/client.js&rev=${rev}` }] })}</sCrIpT></template>`
+    assert.throws(
+      () => clientUrlFromBootHtml(html),
+      error => {
+        assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+        assert.doesNotMatch(error.message, /SYNTHETIC_PSEUDO_CLOSE/)
+        return true
+      },
+    )
+  })
+}
+
+test('clientUrlFromBootHtml accepts adjacent mixed-case tags with post-name whitespace and quoted greater-than attributes', () => {
+  const html = '<TeMpLaTe data-note="quoted > value"></tEmPlAtE \t><ScRiPt\tnonce="quoted > value" type="text/javascript" >window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"/plugins/??dsh-quota-panel/client.js&rev=adjacent-valid"}]}</sCrIpT \t>'
+  assert.equal(clientUrlFromBootHtml(html), '/plugins/??dsh-quota-panel/client.js&rev=adjacent-valid')
 })
 
 test('clientUrlFromBootHtml ignores comment and template decoys when one executable assignment exists', () => {
