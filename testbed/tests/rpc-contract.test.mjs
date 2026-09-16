@@ -195,6 +195,14 @@ test('clientUrlFromBootHtml extracts the revisioned quota client URL and decodes
   )
 })
 
+test('clientUrlFromBootHtml parses the real DSH globalThis bracket boot assignment', () => {
+  const html = '<script>globalThis["__DSH_BOOT__"] = {"rev":"graph-1","plugins":[{"url":"/plugins/??dsh-quota-panel/client.js&rev=quota-real","platform":"web","enabled":true,"id":"dsh-quota-panel"}]}</script>'
+  assert.equal(
+    clientUrlFromBootHtml(html),
+    '/plugins/??dsh-quota-panel/client.js&rev=quota-real',
+  )
+})
+
 test('clientUrlFromBootHtml allows url before id and unrelated fields in the same object', () => {
   const html = '<script>window.__DSH_BOOT__={"plugins":[{"url":"/plugins/??wrong/client.js&amp;rev=wrong","id":"other"},{"url":"/plugins/??dsh-quota-panel/client.js&amp;rev=quota-43","platform":"web","enabled":true,"id":"dsh-quota-panel"}]}</script>'
   assert.equal(

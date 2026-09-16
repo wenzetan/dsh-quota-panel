@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const OBJECT = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const FINITE = value => typeof value === 'number' && Number.isFinite(value)
@@ -146,9 +147,12 @@ export function validateSpecsResponse(text, { rpcId, refreshMs }) {
 }
 
 function bootJsonText(html) {
-  const marker = /window\.__DSH_BOOT__\s*=\s*/g
+  const markers = [
+    /window\.__DSH_BOOT__\s*=\s*/g,
+    /globalThis\[(["'])__DSH_BOOT__\1\]\s*=\s*/g,
+  ]
   let match
-  while ((match = marker.exec(html)) !== null) {
+  for (const marker of markers) while ((match = marker.exec(html)) !== null) {
     const start = match.index + match[0].length
     if (html[start] !== '{' && html[start] !== '[') continue
     const stack = []
@@ -204,4 +208,38 @@ export function clientUrlFromBootHtml(html) {
 export function redactLog(text) {
   requireString(text, 'log text must be a string')
   return text.replace(/\b(token)(\s*=\s*)[^\s&]+/gi, '$1$2[REDACTED]')
+}
+
+async function runCli(argv) {
+  const [command, ...args] = argv
+  if (command === 'contract' && args.length === 1) {
+    process.stdout.write(`${JSON.stringify(await dynamicContract(args[0]))}\n`)
+    return
+  }
+  if (command === 'client-url' && args.length === 1) {
+    process.stdout.write(`${clientUrlFromBootHtml(readFileSync(args[0], 'utf8'))}\n`)
+    return
+  }
+  if (command === 'validate-specs' && args.length === 3) {
+    const refreshMs = Number(args[2])
+    if (!Number.isFinite(refreshMs)) fail('refreshMs CLI argument must be a finite number')
+    const result = validateSpecsResponse(readFileSync(args[0], 'utf8'), { rpcId: args[1], refreshMs })
+    process.stdout.write(`specs rows=${result.rows.length} refreshMs=${result.refreshMs}\n`)
+    return
+  }
+  if (command === 'redact-log' && args.length === 1) {
+    const text = args[0] === '-' ? readFileSync(0, 'utf8') : readFileSync(args[0], 'utf8')
+    process.stdout.write(redactLog(text))
+    return
+  }
+  fail('usage: rpc-contract.mjs contract <plugin-dir> | client-url <html-file> | validate-specs <body-file> <rpc-id> <refresh-ms> | redact-log <log-file|->')
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await runCli(process.argv.slice(2))
+  } catch (error) {
+    process.stderr.write(`rpc-contract: ${error instanceof Error ? error.message : 'operation failed'}\n`)
+    process.exitCode = 1
+  }
 }

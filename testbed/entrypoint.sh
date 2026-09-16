@@ -278,6 +278,13 @@ run_dump_profile_tests() {
 	log test "对照测试全部通过"
 }
 
+run_l2() {
+	log l2 "启动真实 dsh web 并执行认证/boot/client/specs 探针"
+	PLUGIN_DIR=/work/plugin bash /usr/local/bin/probes/boot-probe.sh \
+		|| die "L2 探针失败（详情已由探针脱敏输出）"
+	log l2 "真实 L2 探针通过"
+}
+
 main() {
 	if [ "${1:-}" = "--check-image" ]; then
 		check_image
@@ -292,6 +299,7 @@ main() {
 	want pack && pack_plugin
 	want profile && build_profile
 	want profile && dump_profile
+	want l2 && run_l2
 	log done "所选步骤完成：STEPS=${STEPS}"
 }
 
