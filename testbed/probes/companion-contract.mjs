@@ -2,11 +2,13 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { bootPayloadFromHtml } from './rpc-contract.mjs'
+
 const OBJECT = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const PEER_NAME = 'dsh-llm-newapi'
 const PEER_VERSION = '0.8.6-rc.3'
 const CLIENT_MEMBER = 'package/lib/client.js'
-const USAGE = 'usage: companion-contract.mjs contract | mount-readonly <mountinfo-file|-> <target> | pack <pack-json-file|-> | tar <metadata-json-file|-> <members-json-file> <pack-json-file>'
+const USAGE = 'usage: companion-contract.mjs contract | clients <html-file|-> | mount-readonly <mountinfo-file|-> <target> | pack <pack-json-file|-> | tar <metadata-json-file|-> <members-json-file> <pack-json-file>'
 
 function fail(message) {
   throw new TypeError(message)
@@ -114,6 +116,61 @@ export const COMBO_CONTRACT = deepFreeze(validateContract({
     },
   },
 }))
+
+function comboClientContract(contract) {
+  if (!OBJECT(contract) || !OBJECT(contract.self) || !OBJECT(contract.peer)) return undefined
+  const rows = [contract.self, contract.peer]
+  if (!rows.every(row => typeof row.clientId === 'string'
+    && row.clientId.length > 0
+    && typeof row.package?.name === 'string'
+    && row.package.name.length > 0)
+    || new Set(rows.map(row => row.clientId)).size !== 2
+    || new Set(rows.map(row => row.package.name)).size !== 2) return undefined
+  return rows.map(row => ({ id: row.clientId, packageName: row.package.name }))
+}
+
+function comboClientUrl(url, packageName) {
+  if (typeof url !== 'string' || url.includes('\\') || !url.startsWith('/') || url.startsWith('//')) return undefined
+  const decoded = url.replace(/&amp;/gi, '&')
+  let parsed
+  try {
+    parsed = new URL(decoded, 'http://127.0.0.1')
+  } catch {
+    return undefined
+  }
+  if (parsed.origin !== 'http://127.0.0.1') return undefined
+  const plain = parsed.pathname === `/plugins/${packageName}/client.js`
+  const combo = parsed.pathname === '/plugins/' && parsed.search.startsWith(`??${packageName}/client.js&`)
+  if (!(plain || combo) || !parsed.searchParams.get('rev')) return undefined
+  return decoded
+}
+
+export function comboClientUrlsFromBootHtml(html, contract = COMBO_CONTRACT) {
+  const expected = comboClientContract(contract)
+  if (expected === undefined) fail('combo boot must advertise exactly two valid client URLs')
+  let payload
+  try {
+    payload = bootPayloadFromHtml(html)
+  } catch {
+    fail('combo boot must advertise exactly two valid client URLs')
+  }
+  const objects = []
+  const visit = value => {
+    if (!value || typeof value !== 'object') return
+    if (typeof value.id === 'string') objects.push(value)
+    for (const child of Object.values(value)) visit(child)
+  }
+  visit(payload)
+  const result = []
+  for (const row of expected) {
+    const matches = objects.filter(value => value.id === row.id)
+    if (matches.length !== 1) fail('combo boot must advertise exactly two valid client URLs')
+    const url = comboClientUrl(matches[0].url, row.packageName)
+    if (url === undefined) fail('combo boot must advertise exactly two valid client URLs')
+    result.push({ id: row.id, url })
+  }
+  return result
+}
 
 const MOUNT_ESCAPE = Object.freeze({
   '040': ' ',
@@ -262,6 +319,10 @@ async function runCli(argv) {
   const [command, ...args] = argv
   if (command === 'contract' && args.length === 0) {
     process.stdout.write(`${JSON.stringify(COMBO_CONTRACT)}\n`)
+    return
+  }
+  if (command === 'clients' && args.length === 1) {
+    process.stdout.write(`${JSON.stringify(comboClientUrlsFromBootHtml(readInput(args[0])))}\n`)
     return
   }
   if (command === 'mount-readonly' && args.length === 2) {

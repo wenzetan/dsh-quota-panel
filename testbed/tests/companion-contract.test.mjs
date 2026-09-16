@@ -9,6 +9,7 @@ import { test } from 'node:test'
 import {
   COMBO_CONTRACT,
   assertMountReadonly,
+  comboClientUrlsFromBootHtml,
   parseMountInfo,
   parsePackJson,
   validateTarPackage,
@@ -148,6 +149,122 @@ test('contract CLI consumes and emits the exported contract exactly', () => {
   assert.equal(result.status, 0, result.stderr)
   assert.equal(result.stderr, '')
   assert.deepEqual(JSON.parse(result.stdout), COMBO_CONTRACT)
+})
+
+const bootHtml = (plugins, assignment = 'globalThis["__DSH_BOOT__"]') => `<script>${assignment}=${JSON.stringify({ rev: 'graph', plugins })}</script>`
+const client = (id, url) => ({ id, url, platform: 'web' })
+
+for (const [name, plugins, assignment] of [
+  [
+    'real globalThis boot order',
+    [
+      client('dsh-quota-panel', '/plugins/??dsh-quota-panel/client.js&rev=self-1'),
+      client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer-1'),
+    ],
+    'globalThis["__DSH_BOOT__"]',
+  ],
+  [
+    'swapped window boot order',
+    [
+      client('dsh-llm-newapi', '/plugins/??dsh-llm-newapi/client.js&amp;rev=peer-2'),
+      client('dsh-quota-panel', '/plugins/dsh-quota-panel/client.js?rev=self-2'),
+    ],
+    'window.__DSH_BOOT__',
+  ],
+]) {
+  test(`comboClientUrlsFromBootHtml returns contract order for ${name}`, () => {
+    assert.deepEqual(comboClientUrlsFromBootHtml(bootHtml(plugins, assignment)), [
+      { id: 'dsh-quota-panel', url: plugins.find(row => row.id === 'dsh-quota-panel').url.replaceAll('&amp;', '&') },
+      { id: 'dsh-llm-newapi', url: plugins.find(row => row.id === 'dsh-llm-newapi').url.replaceAll('&amp;', '&') },
+    ])
+  })
+}
+
+for (const [name, contract, plugins, marker] of [
+  [
+    'duplicate client IDs',
+    {
+      self: { clientId: 'same-client', package: { name: 'self-package' } },
+      peer: { clientId: 'same-client', package: { name: 'peer-package' } },
+    },
+    [client('same-client', '/plugins/self-package/client.js?rev=SYNTHETIC_SAME_ID')],
+    'SYNTHETIC_SAME_ID',
+  ],
+  [
+    'duplicate package names',
+    {
+      self: { clientId: 'self-client', package: { name: 'same-package' } },
+      peer: { clientId: 'peer-client', package: { name: 'same-package' } },
+    },
+    [
+      client('self-client', '/plugins/same-package/client.js?rev=SYNTHETIC_SELF_PACKAGE'),
+      client('peer-client', '/plugins/same-package/client.js?rev=SYNTHETIC_PEER_PACKAGE'),
+    ],
+    'SYNTHETIC_.*_PACKAGE',
+  ],
+]) {
+  test(`comboClientUrlsFromBootHtml rejects custom contracts with ${name}`, () => {
+    rejectsFixed(
+      () => comboClientUrlsFromBootHtml(bootHtml(plugins), contract),
+      'combo boot must advertise exactly two valid client URLs',
+      [marker],
+    )
+  })
+}
+
+test('comboClientUrlsFromBootHtml consumes a validated custom contract shape', () => {
+  const contract = {
+    self: { clientId: 'custom-self', package: { name: '@scope/custom-self' } },
+    peer: { clientId: 'custom-peer', package: { name: 'custom-peer-package' } },
+  }
+  assert.deepEqual(comboClientUrlsFromBootHtml(bootHtml([
+    client('custom-peer', '/plugins/custom-peer-package/client.js?rev=peer'),
+    client('custom-self', '/plugins/??@scope/custom-self/client.js&rev=self'),
+  ]), contract), [
+    { id: 'custom-self', url: '/plugins/??@scope/custom-self/client.js&rev=self' },
+    { id: 'custom-peer', url: '/plugins/custom-peer-package/client.js?rev=peer' },
+  ])
+})
+
+for (const [name, plugins, marker] of [
+  ['missing peer', [client('dsh-quota-panel', '/plugins/dsh-quota-panel/client.js?rev=self')], 'SYNTHETIC_MISSING'],
+  ['duplicate self', [client('dsh-quota-panel', '/plugins/dsh-quota-panel/client.js?rev=one'), client('dsh-quota-panel', '/plugins/dsh-quota-panel/client.js?rev=two'), client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer')], 'SYNTHETIC_DUPLICATE'],
+  ['cross package', [client('dsh-quota-panel', '/plugins/dsh-llm-newapi/client.js?rev=self'), client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer')], 'SYNTHETIC_CROSS'],
+  ['fragment-only revision', [client('dsh-quota-panel', '/plugins/dsh-quota-panel/client.js#rev=self'), client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer')], 'SYNTHETIC_FRAGMENT'],
+  ['pathname amp revision', [client('dsh-quota-panel', '/plugins/dsh-quota-panel/client.js&rev=self'), client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer')], 'SYNTHETIC_PATH_AMP'],
+  ['raw backslash', [client('dsh-quota-panel', '/plugins\\dsh-quota-panel/client.js?rev=self'), client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer')], 'SYNTHETIC_BACKSLASH'],
+  ['absolute URL', [client('dsh-quota-panel', 'http://127.0.0.1/plugins/dsh-quota-panel/client.js?rev=self'), client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer')], 'SYNTHETIC_ABSOLUTE'],
+  ['protocol-relative URL', [client('dsh-quota-panel', '//evil.invalid/plugins/dsh-quota-panel/client.js?rev=self'), client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer')], 'SYNTHETIC_PROTOCOL'],
+]) {
+  test(`comboClientUrlsFromBootHtml rejects ${name} with a fixed non-echoing error`, () => {
+    const html = `${bootHtml(plugins)}<!--${marker}-->`
+    rejectsFixed(() => comboClientUrlsFromBootHtml(html), 'combo boot must advertise exactly two valid client URLs', [marker])
+  })
+}
+
+test('clients CLI accepts a file and stdin and emits only safe ordered JSON', t => {
+  const html = bootHtml([
+    client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer-cli'),
+    client('dsh-quota-panel', '/plugins/dsh-quota-panel/client.js?rev=self-cli'),
+  ])
+  const files = tempFiles(t, { html })
+  for (const [path, input] of [[files.html, undefined], ['-', html]]) {
+    const result = cli(['clients', path], input)
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(result.stderr, '')
+    assert.deepEqual(JSON.parse(result.stdout), [
+      { id: 'dsh-quota-panel', url: '/plugins/dsh-quota-panel/client.js?rev=self-cli' },
+      { id: 'dsh-llm-newapi', url: '/plugins/dsh-llm-newapi/client.js?rev=peer-cli' },
+    ])
+  }
+})
+
+test('clients CLI rejects invalid HTML without echoing it', () => {
+  const result = cli(['clients', '-'], '<html>SYNTHETIC_CLIENT_HTML</html>')
+  assert.equal(result.status, 1)
+  assert.equal(result.stdout, '')
+  assert.equal(result.stderr, 'companion-contract: combo boot must advertise exactly two valid client URLs\n')
+  assert.doesNotMatch(result.stderr, /SYNTHETIC_CLIENT_HTML/)
 })
 
 test('parseMountInfo decodes kernel octal escapes and keeps pre-separator options', () => {
@@ -414,7 +531,7 @@ test('tar CLI accepts metadata from stdin', t => {
 })
 
 test('CLI rejects unknown commands and extra arguments with one fixed usage line', () => {
-  const expected = 'companion-contract: usage: companion-contract.mjs contract | mount-readonly <mountinfo-file|-> <target> | pack <pack-json-file|-> | tar <metadata-json-file|-> <members-json-file> <pack-json-file>\n'
+  const expected = 'companion-contract: usage: companion-contract.mjs contract | clients <html-file|-> | mount-readonly <mountinfo-file|-> <target> | pack <pack-json-file|-> | tar <metadata-json-file|-> <members-json-file> <pack-json-file>\n'
   for (const args of [[], ['SYNTHETIC_COMMAND'], ['contract', 'SYNTHETIC_EXTRA'], ['pack']]) {
     const result = cli(args)
     assert.equal(result.status, 1)
