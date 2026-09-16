@@ -28,11 +28,18 @@ FIX="$HERE/fixtures"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/dump-profile-test.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
-# 默认测"真正安装的 entrypoint"。`LEGACY_DUMP_PROFILE=1` 时改测 HEAD=5c95069 的旧
-# dump_profile（红例对照，见 fixtures/legacy-dump-profile.sh），用来演示这套用例能红。
+# 默认测"真正安装的 entrypoint"。`LEGACY_DUMP_PROFILE` 用于红例对照，取值：
+#   full  —— 5c95069 的旧 dump_profile（混流 + 明文 grep），见 fixtures/legacy-dump-profile.sh
+#   loose —— 初版宽松 assert_plugin_row（name 任意缩进、不重置顶层项状态），
+#            见 fixtures/legacy-assert-row.sh
 TARGET="$ENTRYPOINT"
-if [ "${LEGACY_DUMP_PROFILE:-}" = "1" ]; then
-	TARGET="$FIX/legacy-dump-profile.sh"
+if [ -n "${LEGACY_DUMP_PROFILE:-}" ]; then
+	case "$LEGACY_DUMP_PROFILE" in
+		full) TARGET="$FIX/legacy-dump-profile.sh" ;;
+		loose) TARGET="$FIX/legacy-assert-row.sh" ;;
+		*) echo "FATAL: LEGACY_DUMP_PROFILE 只支持 full|loose，收到：$LEGACY_DUMP_PROFILE"; exit 2 ;;
+	esac
+	echo "!! 红例对照模式：${LEGACY_DUMP_PROFILE}（不是产品实现）"
 	export REAL_ENTRYPOINT="$ENTRYPOINT"
 fi
 
@@ -117,6 +124,7 @@ run_case comment-only "$FIX/dsh-stub-emit.sh" 1 "组合树中没有 dsh-quota-pa
 run_case similar-name "$FIX/dsh-stub-emit.sh" 1 "组合树中没有 dsh-quota-panel 行" "$FIX/similar-name-dump.txt"
 run_case clean-no-target "$FIX/dsh-stub-emit.sh" 1 "组合树中没有 dsh-quota-panel 行" "$FIX/clean-other-layers-dump.txt"
 run_case malformed-row "$FIX/dsh-stub-malformed.sh" 1 "组合树中没有 dsh-quota-panel 行" ""
+run_case name-in-other-config "$FIX/dsh-stub-name-in-other-config.sh" 1 "组合树中没有 dsh-quota-panel 行" ""
 run_case stderr-warning "$FIX/dsh-stub-stderr-warning.sh" 1 "组合树中没有 dsh-quota-panel 行" ""
 run_case name-on-stderr "$FIX/dsh-stub-name-on-stderr.sh" 1 "组合树中没有 dsh-quota-panel 行" ""
 run_case dump-fails "$FIX/dsh-stub-fails.sh" 1 "dsh --dump-config 失败" ""

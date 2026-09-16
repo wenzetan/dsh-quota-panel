@@ -181,30 +181,38 @@ build_profile() {
 #
 # 宿主 dump 规范（dsh 0.1.5-rc.1 对 --dump-config 的实测输出，见 tests/fixtures/real-dump-sample.txt）：
 #   组合树是 YAML 列表，插件行形如
-#     - id: quota-panel
-#       name: dsh-quota-panel          <- name 恰好缩进 2 空格、裸值、行尾无内容
-#   并在该层插入处带一行注释头 `# == <包名>`。注释头与 `name:` 值都可能只是别的层/
-#   别的包的影子（base 层被 patch 时 section 头是 `# == <base>, patched by <plugin>`，
-#   同名前缀的包也会有同样的 `- id:`/`name:` 行），因此只按"整份文本含子串"判绿会被
-#   注释头、相似包名（dsh-quota-panel-companion）和 dsh 自身诊断骗过。
+#     - id: quota-panel              <- 顶层列表项：`-` 在第 0 列
+#       name: dsh-quota-panel        <- 该行的 name 恰好缩进 2 空格、裸值、行尾无内容
+#   行的 config 块则更深（4 空格起）。该层插入处另有一行注释头 `# == <包名>`。
+#   注释头与 name 值都可能是影子（base 层被 patch 时 section 头是
+#   `# == <base>, patched by <plugin>`；同名前缀的包也有同样的 `- id:`/`name:` 行），
+#   所以只按"整份文本含子串"判绿会被注释头、相似包名（dsh-quota-panel-companion）
+#   和 dsh 自身诊断骗过。
 #
-# 这里按行判定：先记住最近一个 `- id:` 列表项（"这是一行"的结构锚点），再要求随后的
-# name 行与目标包名逐字相等。返回 0 命中 / 1 未命中（结构不符也归为未命中——本函数只
-# 回答"这一行在不在"，dump 命令本身的失败由调用点单独判定）。
+# 本函数只按上面这份**已实测的**规范做行级判定，不实现通用 YAML 解析：
+#   * `- id:` 必须是顶层列表项（`-` 在第 0 列），每个新顶层项都重置状态——
+#     否则其它插件 config 里的 `name:` 会被误算成"插件行的 name"；
+#   * name 行必须恰好缩进 2 空格（本规范里 2 空格即该行的 name，4 空格以上属 config 块）；
+#   * 值必须与目标包名逐字相等。
+# 规范之外的形状（不同缩进、带引号、config 内出现 2 空格 name 等）一律判为**未命中**
+# （fail closed，宁可假红不可假绿）。返回 0 命中 / 1 未命中；dump 命令自身的失败由调用点
+# 单独判定，不在本函数的职责内。
 assert_plugin_row() {
 	awk -v want="$2" '
 		function finish() { exit found ? 0 : 1 }
-		/^-[[:space:]]+id:/ { last_id_line = NR; next }
+		/^-[[:space:]]+id:/ { last_id_line = NR; in_config = 0; next }
 		/^[[:space:]]*#/ { next }
-		/^[[:space:]]*name:/ {
-			if (last_id_line) {
+		/^  name:[[:space:]]/ {
+			if (last_id_line && !in_config) {
 				value = $0
-				sub(/^[[:space:]]*name:[[:space:]]*/, "", value)
+				sub(/^  name:[[:space:]]*/, "", value)
 				sub(/[[:space:]]+$/, "", value)
 				if (value == want) found = 1
 			}
 			next
 		}
+		/^  config:[[:space:]]*$/ { in_config = 1; next }
+		/^  [^[:space:]]/ { in_config = 0; next }
 		END { finish() }
 	' "$1"
 }
@@ -219,8 +227,8 @@ dump_profile() {
 	# source 本文件跑时，把 --dump-config 的输出写进临时目录，无需 Docker。
 	local dump="${DUMP_CONFIG_PATH:-/work/dump-config.txt}"
 	local dump_err="${DUMP_STDERR_PATH:-/work/dump-config.stderr.txt}"
-	# dsh 的失败必须放在 if 条件里捕获：本脚本是 `set -euo pipefail`，
-	# 裸的失败命令会在 `rc=$?` 之前就把 shell 收摊（表现为只有 [done]、没有 [fail] 报文）。
+	# dsh 的失败放进 if 条件显式捕获：这样既拿到 rc 用于诊断报文，也不让失败退出码
+	# 经由本脚本的 `set -e` 提前收摊（收摊会丢掉 rc 与后续的分支判定）。
 	if dsh --profile web --dump-config > "$dump" 2> "$dump_err"; then
 		rc=0
 	else
@@ -228,7 +236,7 @@ dump_profile() {
 	fi
 	[ "$rc" -eq 0 ] \
 		|| die "dsh --dump-config 失败（rc=$rc），见 $dump 与 $dump_err"
-	# 同理：断言的非零返回是"判定结果"而不是脚本错误，必须由 if 捕获而不是让它触发 set -e。
+	# 同理：断言的非零返回是"判定结果"而不是脚本错误，由 if 显式捕获并转成 die 报文。
 	if assert_plugin_row "$dump" dsh-quota-panel; then
 		:
 	else
