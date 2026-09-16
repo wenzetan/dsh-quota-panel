@@ -147,8 +147,8 @@ function makeFixture(t, scenario = 'success') {
     WORK_DIR: work,
     LOG: join(work, 'dsh-web.log'),
     COOKIE: join(work, 'cookies.txt'),
-    L2_DEADLINE_SECONDS: scenario === 'contract-hang' ? '1' : ['missing-token', 'client-helper-hang'].includes(scenario) ? '3' : '5',
-    L2_POLL_SECONDS: '0.02',
+    L2_DEADLINE_SECONDS: scenario === 'contract-hang' ? '1' : scenario === 'client-helper-hang' ? '3' : '5',
+    L2_POLL_SECONDS: scenario === 'missing-token' ? '5' : '0.02',
     CURL_CONNECT_TIMEOUT: '1',
     CURL_MAX_TIME: '1',
     FAIL_LOG_LINES: '20',
@@ -303,7 +303,12 @@ test('missing startup token and missing session cookie both fail closed', async 
   await t.test('token is mandatory', t => {
     const result = runProbe(t, 'missing-token')
     assert.notEqual(result.status, 0, result.output)
-    assert.match(result.output, /token.*未取得|未取得.*token/i)
+    assert.match(result.output, /token/i)
+    assert.ok(
+      /未取得/.test(result.output) || (/(?:截止时间|deadline)/i.test(result.output) && /(?:等待|耗尽)/.test(result.output)),
+      `missing-token failure must report unavailable token or exhausted waiting deadline: ${result.output}`,
+    )
+    assert.match(result.output, /token\s*=\s*\[REDACTED\]/i)
     assert.doesNotMatch(result.output, new RegExp(`${syntheticToken}|${syntheticLogToken}`))
     assertStoppedAndReaped(result)
   })
