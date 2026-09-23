@@ -36,7 +36,10 @@ function makeFixture(t, scenario = 'success') {
   const reaped = join(dir, 'dsh.reaped')
   const boot = join(dir, 'boot.html')
   const specs = join(dir, 'specs.json')
-  writeFileSync(boot, '<!doctype html><script>window.__DSH_BOOT__ = {"meta":{"shape":"representative-real-boot"},"plugins":[{"url":"/plugins/??dsh-quota-panel/client.js&amp;rev=quota-real-42","platform":"web","enabled":true,"id":"dsh-quota-panel"}]};</script>\n')
+  // The 0.1.5 host advertises the absolute path and 0.1.7 the document-relative
+  // reference; both carry the HTML-escaped ampersand a real boot script uses.
+  const bootClientUrl = (scenario === 'relative-boot-url' ? advertisedClient.slice(1) : advertisedClient).replace('&', '&amp;')
+  writeFileSync(boot, `<!doctype html><script>window.__DSH_BOOT__ = {"meta":{"shape":"representative-real-boot"},"plugins":[{"url":"${bootClientUrl}","platform":"web","enabled":true,"id":"dsh-quota-panel"}]};</script>\n`)
   writeFileSync(specs, scenario === 'bad-specs'
     ? JSON.stringify({ type: 'server-response', rpcId: 'wrong-id', result: { ok: false, error: { message: responseMarker } } })
     : JSON.stringify({ type: 'server-response', rpcId: 'testbed-probe', result: { ok: true, value: { rows: [], refreshMs: 60000 } } }))
@@ -279,6 +282,16 @@ test('real shell flow requires --no-open, authenticates, GETs advertised revisio
   assert.doesNotMatch(result.output, new RegExp(`${syntheticToken}|${syntheticLogToken}`))
   assertStoppedAndReaped(result)
   assert.equal(statSync(join(result.work, 'dsh-web.log')).mode & 0o077, 0, 'probe-created log must deny group/other access under umask 077')
+})
+
+test('real shell flow resolves the 0.1.7 document-relative boot reference before fetching it', t => {
+  const result = runProbe(t, 'relative-boot-url')
+  assert.equal(result.status, 0, result.output)
+  const calls = readFileSync(result.curlTrace, 'utf8').trim().split('\n').map(line => line.split('\t'))
+  assert.ok(calls.some(([method, url]) => method === 'GET' && url === `http://127.0.0.1:31999${advertisedClient}`), 'the document-relative advertised reference must be fetched as an absolute path')
+  assert.equal(helperModes(result).includes('client-url'), true, 'the boot reference still belongs to the client-url helper')
+  assert.match(result.output, /L2 全部通过/)
+  assertStoppedAndReaped(result)
 })
 
 for (const [signal, expected] of [['SIGHUP', 129], ['SIGINT', 130], ['SIGTERM', 143]]) {

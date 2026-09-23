@@ -182,6 +182,36 @@ for (const [name, plugins, assignment] of [
   })
 }
 
+// DSH 0.1.7 made app-owned browser routes document-relative, so both rows of a
+// real combo boot advertise `plugins/...` with no leading slash; the helper
+// resolves them against the probed page origin so the companion harness can
+// still curl `${origin}${path}` on either host line.
+test('comboClientUrlsFromBootHtml resolves the 0.1.7 document-relative references to absolute paths', () => {
+  const plugins = [
+    client('dsh-quota-panel', 'plugins/??dsh-quota-panel/client.js&rev=self-3'),
+    client('dsh-llm-newapi', 'plugins/dsh-llm-newapi/client.js?rev=peer-3'),
+  ]
+  assert.deepEqual(comboClientUrlsFromBootHtml(bootHtml(plugins)), [
+    { id: 'dsh-quota-panel', url: '/plugins/??dsh-quota-panel/client.js&rev=self-3' },
+    { id: 'dsh-llm-newapi', url: '/plugins/dsh-llm-newapi/client.js?rev=peer-3' },
+  ])
+})
+
+test('comboClientUrlsFromBootHtml rejects a document-relative authority without echoing the URL', () => {
+  const plugins = [
+    client('dsh-quota-panel', '//evil.invalid/plugins/??dsh-quota-panel/client.js&rev=SYNTHETIC_RELATIVE_AUTHORITY'),
+    client('dsh-llm-newapi', '/plugins/dsh-llm-newapi/client.js?rev=peer-4'),
+  ]
+  assert.throws(
+    () => comboClientUrlsFromBootHtml(bootHtml(plugins)),
+    error => {
+      assert.equal(error.message, 'combo boot must advertise exactly two valid client URLs')
+      assert.doesNotMatch(error.message, /evil|SYNTHETIC_RELATIVE_AUTHORITY/)
+      return true
+    },
+  )
+})
+
 for (const [name, contract, plugins, marker] of [
   [
     'duplicate client IDs',

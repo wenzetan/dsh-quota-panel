@@ -1,75 +1,75 @@
-# 真实样本：dsh 0.1.5-rc.1 + dsh-quota-panel@0.9.2-rc.4 装入 minimal profile 后 --dump-config 的第 470-545 行
+# 真实样本：dsh 0.1.7-rc.1 + dsh-quota-panel 装入 minimal profile 后 --dump-config 的第 1165-1240 行
 # 重新生成：tests/capture-real-dump.sh（会重跑 pack+profile）
-  name: '@deepseek-ai/dsh-client-ui-sidebar-right'
-- id: ui-sidebar-documentpreview
-  name: '@deepseek-ai/dsh-client-ui-sidebar-documentpreview'
-- id: ui-sidebar-files
-  name: '@deepseek-ai/dsh-client-ui-sidebar-files'
-- id: ui-settings
-  name: '@deepseek-ai/dsh-client-ui-settings'
-- id: ui-settings-general
-  name: '@deepseek-ai/dsh-client-ui-settings-general'
-- id: ui-settings-models
-  name: '@deepseek-ai/dsh-client-ui-settings-models'
-- id: ui-settings-plugin-inventory
-  name: '@deepseek-ai/dsh-client-ui-settings-plugin-inventory'
-- id: ui-conversation
-  name: '@deepseek-ai/dsh-client-ui-conversation'
-- id: ui-approval
-  name: '@deepseek-ai/dsh-client-ui-approval'
-- id: ui-chat
-  name: '@deepseek-ai/dsh-client-ui-chat'
-- id: ui-brand-official
-  name: '@deepseek-ai/dsh-client-ui-brand-official'
-- id: ui-attachment
-  name: '@deepseek-ai/dsh-client-ui-attachment'
-- id: ui-tool
-  name: '@deepseek-ai/dsh-client-ui-tool'
-- id: ui-cordis
-  name: '@deepseek-ai/dsh-client-ui-cordis'
-- id: ui-workflow-run
-  name: '@deepseek-ai/dsh-client-ui-workflow-run'
-- id: ui-deliverables
-  name: '@deepseek-ai/dsh-client-ui-deliverables'
-- id: ui-workspace
-  name: '@deepseek-ai/dsh-client-ui-workspace'
-- id: ui-input-trigger
-  name: '@deepseek-ai/dsh-client-ui-input-trigger'
-- id: ui-commands
-  name: '@deepseek-ai/dsh-client-ui-commands'
-- id: ui-skill
-  name: '@deepseek-ai/dsh-client-ui-skill'
-- id: ui-subagent
-  name: '@deepseek-ai/dsh-client-ui-subagent'
-- id: ui-reference
-  name: '@deepseek-ai/dsh-client-ui-reference'
-- id: ui-schedule
-  name: '@deepseek-ai/dsh-client-ui-schedule'
-  disabled: true
-- id: ui-jobs
-  name: '@deepseek-ai/dsh-client-ui-jobs'
-- id: ui-goal
-  name: '@deepseek-ai/dsh-client-ui-goal'
-- id: ui-message-feedback
-  name: '@deepseek-ai/dsh-client-ui-message-feedback'
-- id: ui-model-selection
-  name: '@deepseek-ai/dsh-client-ui-model-selection'
-- id: ui-permission
-  name: '@deepseek-ai/dsh-client-ui-permission-presets'
-- id: ui-agent-preset
-  name: '@deepseek-ai/dsh-client-ui-agent-preset'
-- id: ui-settings-plugins
-  name: '@deepseek-ai/dsh-client-ui-settings-plugins'
-- id: ui-plan
-  name: '@deepseek-ai/dsh-client-ui-plan'
-- id: ui-user-questions
-  name: '@deepseek-ai/dsh-client-ui-user-questions'
-- id: ui-trajectory
-  name: '@deepseek-ai/dsh-client-ui-trajectory'
-- id: agent-presets
-  name: '@deepseek-ai/dsh-agent-presets'
-  config:
-    default: standard
+          - id: tool-subagent-list-agents
+            name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+          - id: tool-subagent
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              toolName: subagent
+              modelSelectionSettings: true
+              backgroundMode: continuable
+          - id: tool-subagent-fork
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: fork
+              toolName: subagent_fork
+              backgroundMode: continuable
+          - id: tool-subagent-codex
+            name: '@deepseek-ai/dsh-tool-subagent'
+            disabled: true
+            config:
+              provider: codex
+              toolName: subagent_codex
+              backgroundMode: one-shot
+              maxDepth: provider-managed
+          - id: tool-subagent-claude-code
+            name: '@deepseek-ai/dsh-tool-subagent'
+            disabled: true
+            config:
+              provider: claude-code
+              toolName: subagent_claude_code
+              backgroundMode: one-shot
+              maxDepth: provider-managed
+          - id: workflow-ptc
+            name: '@deepseek-ai/dsh-workflow-ptc'
+            config:
+              provider: spawn
+          - id: tool-workflow
+            name: '@deepseek-ai/dsh-tool-workflow'
+          - id: tool-ralph
+            name: '@deepseek-ai/dsh-tool-ralph'
+            disabled: true
+            config:
+              subagentProvider: spawn
+              maxRounds: 64
+      - id: tool-ask-user
+        name: '@deepseek-ai/dsh-tool-ask-user'
+      - id: tool-todo
+        name: '@deepseek-ai/dsh-tool-todo'
+        config:
+          allowParallelInProgress: true
+      - id: tool-web
+        name: '@deepseek-ai/dsh-tool-web'
+        config:
+          fetch: true
+          searchTimeoutMs: 60000
+      - id: tool-cordis
+        name: '@deepseek-ai/dsh-tool-cordis'
+      - id: skill-filesystem
+        name: '@deepseek-ai/dsh-skill-filesystem'
+        config:
+          customSkillDirs:
+            - !!js >-
+              process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')),
+              'skills')
+      - id: tool-skill
+        name: '@deepseek-ai/dsh-tool-skill'
+      - id: present
+        name: '@deepseek-ai/dsh-tool-present'
+      - id: tool-plugin-manager
+        name: '@deepseek-ai/dsh-plugin-manager/tools'
+        disabled: !!js '!ctx.get(''profileContext'')'
 # == dsh-quota-panel
 - id: quota-panel
   name: dsh-quota-panel

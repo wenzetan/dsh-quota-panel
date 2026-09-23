@@ -172,10 +172,13 @@ jobs:
         with:
           node-version: 24
       - name: Install dsh and pnpm
+        # Pin the host line this checkout is verified against: npm's `latest`
+        # dist-tag still points at the 0.1.5-rc line, so an unpinned install
+        # would silently test a different host than the testbed and docs pin.
         # --registry=npmmirror: same npmjs CDN stale-packument workaround as
         # the plugin_check step (@deepseek-ai/* deps hit EINTEGRITY on the
         # default registry since the 2026-08-21 bulk republish). REVERT later.
-        run: npm install -g --registry=https://registry.npmmirror.com @deepseek-ai/dsh pnpm
+        run: npm install -g --registry=https://registry.npmmirror.com @deepseek-ai/dsh@0.1.7-rc.1 pnpm
       - name: Install the packed tarball into a fresh web profile
         run: |
           set -euo pipefail
@@ -277,10 +280,11 @@ jobs:
           echo "web ready on :3080"
 
           # The plugin's browser half is served for the module loader. DSH
-          # 0.1.5 composes revisioned module URLs
-          # (`/plugins/??<id>/client.js&rev=<rev>`) and 404s the plain path,
-          # so read the advertised URL out of the boot payload; fall back to
-          # the plain path for older versions.
+          # composes revisioned module URLs (`/plugins/??<id>/client.js&rev=<rev>`)
+          # and 404s the plain path, so read the advertised URL out of the boot
+          # payload; fall back to the plain path for older versions. 0.1.7 made
+          # app-owned browser routes document-relative (`plugins/??...`), so
+          # normalize the advertised reference to a path before probing it.
           BOOT_HTML="$RUNNER_TEMP/boot.html"
           curl -s -o "$BOOT_HTML" "${AUTH[@]}" http://127.0.0.1:3080/ || true
           CLIENT_URL="$(node -e '
@@ -288,7 +292,8 @@ jobs:
             let html = ""
             try { html = fs.readFileSync(process.argv[1], "utf8") } catch {}
             const m = /"id":"dsh-quota-panel","url":"([^"]+)"/.exec(html)
-            process.stdout.write(m ? m[1].replace(/&amp;/g, "&") : "")
+            const url = m ? m[1].replace(/&amp;/g, "&") : ""
+            process.stdout.write(url === "" || url.startsWith("/") ? url : "/" + url)
           ' "$BOOT_HTML" 2>/dev/null || true)"
           if [ -z "$CLIENT_URL" ]; then
             CLIENT_URL="/plugins/dsh-quota-panel/client.js"

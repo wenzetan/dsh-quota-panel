@@ -257,6 +257,45 @@ test('clientUrlFromBootHtml accepts a plain quota client path with a revision qu
   )
 })
 
+// DSH 0.1.7 made app-owned browser routes document-relative: the boot graph
+// advertises `plugins/??<id>/client.js&rev=<rev>` with no leading slash. The
+// helper resolves that against the probed page origin and still hands the
+// probe one absolute path, so the shell that curls `${origin}${path}` works
+// on both host lines.
+test('clientUrlFromBootHtml resolves the 0.1.7 document-relative combo reference to an absolute path', () => {
+  const html = '<script>window.__DSH_BOOT__={"rev":"graph-1","entries":[{"id":"dsh-quota-panel","url":"plugins/??dsh-quota-panel/client.js&rev=quota-relative","rev":"quota-relative","inject":[]}]}</script>'
+  assert.equal(
+    clientUrlFromBootHtml(html),
+    '/plugins/??dsh-quota-panel/client.js&rev=quota-relative',
+  )
+})
+
+test('clientUrlFromBootHtml resolves the 0.1.7 document-relative plain client reference', () => {
+  const html = '<script>window.__DSH_BOOT__={"plugins":[{"id":"dsh-quota-panel","url":"plugins/dsh-quota-panel/client.js?rev=quota-relative-plain"}]}</script>'
+  assert.equal(
+    clientUrlFromBootHtml(html),
+    '/plugins/dsh-quota-panel/client.js?rev=quota-relative-plain',
+  )
+})
+
+for (const [name, url] of [
+  ['an absolute scheme', 'https://evil.invalid/plugins/dsh-quota-panel/client.js?rev=SYNTHETIC_RELATIVE_SCHEME'],
+  ['a protocol-relative authority', '//evil.invalid/plugins/dsh-quota-panel/client.js?rev=SYNTHETIC_RELATIVE_AUTHORITY'],
+  ['a scheme-relative combo reference', '//evil.invalid/plugins/??dsh-quota-panel/client.js&rev=SYNTHETIC_RELATIVE_COMBO'],
+]) {
+  test(`clientUrlFromBootHtml rejects a document-relative URL smuggling ${name}`, () => {
+    const html = `<script>window.__DSH_BOOT__=${JSON.stringify({ plugins: [{ id: 'dsh-quota-panel', url }] })}</script>`
+    assert.throws(
+      () => clientUrlFromBootHtml(html),
+      error => {
+        assert.equal(error.message, 'boot HTML must advertise a revisioned dsh-quota-panel client URL')
+        assert.doesNotMatch(error.message, /evil|SYNTHETIC_RELATIVE/)
+        return true
+      },
+    )
+  })
+}
+
 test('clientUrlFromBootHtml rejects a backslash authority URL whose parsed origin is cross-origin', () => {
   const url = '/\\evil.invalid/plugins/dsh-quota-panel/client.js?rev=SYNTHETIC_CROSS_ORIGIN'
   assert.equal(new URL(url, 'http://127.0.0.1').origin, 'http://evil.invalid')

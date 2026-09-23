@@ -496,6 +496,27 @@ OpenCode usage (`high = max(rolling, weekly, monthly)`):
 | `>= warnPercent` | warn (amber dot + bar) |
 | `>= errorPercent` | error (red dot + bar) |
 
+## Compatibility
+
+| Host line (`@deepseek-ai/dsh`) | Status |
+|---|---|
+| `0.1.7-rc.1` (npm `next`) | Verified: testbed + CI boot gate pin this version; `docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md` records the seam-by-seam diff |
+| `0.1.5-rc.3` (npm `latest`) | Verified with the same tree: testbed L1 + L2 pass (no `dsh-*` peer is declared, so the host-side plugin version gate stays inactive) |
+
+Pin `0.1.5-rc.3`, not `0.1.5-rc.1`: the rc.1 release resolves its family
+dependencies through `^0.1.5-rc.1` ranges, and a fresh global install mixes
+0.1.5-rc.1/rc.3 layouts until `@deepseek-ai/dsh-sandbox-local` (a row declared
+by `dsh-base`) can no longer be resolved, so `dsh web` refuses to boot before
+any plugin is involved. 0.1.7-rc.1 pins all 72 family dependencies exactly.
+
+The plugin talks to the host through services only — `connection.fetch` /
+`connection.rpc`, `credentials.resolve`, and on the browser side
+`slots` / `timer` / `connection` / `locale` — and declares no
+`@deepseek-ai/dsh*` peer dependency. It therefore rides the whole 0.1.x line
+instead of one exact host build; `testbed/` and the CI boot job are the
+authoritative checks for a host line (see
+[`docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md`](docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md)).
+
 ## Install
 
 **Install a released version — not the `main` branch.** `main` receives

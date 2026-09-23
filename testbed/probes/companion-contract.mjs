@@ -131,8 +131,14 @@ function comboClientContract(contract) {
 }
 
 function comboClientUrl(url, packageName) {
-  if (typeof url !== 'string' || url.includes('\\') || !url.startsWith('/') || url.startsWith('//')) return undefined
-  const decoded = url.replace(/&amp;/gi, '&')
+  const bare = typeof url === 'string' ? url.replace(/&amp;/gi, '&') : ''
+  if (bare === '' || bare.startsWith('//') || bare.includes('\\')) return undefined
+  // DSH 0.1.7 made app-owned browser routes document-relative, so the boot
+  // graph advertises `plugins/??<id>/client.js&rev=<rev>` where 0.1.5
+  // advertised `/plugins/??<id>/client.js&rev=<rev>`. Resolve both against
+  // the probed page origin (the testbed always fetches the application root)
+  // and hand consumers one absolute path.
+  const decoded = bare.startsWith('/') ? bare : `/${bare}`
   let parsed
   try {
     parsed = new URL(decoded, 'http://127.0.0.1')

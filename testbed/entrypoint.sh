@@ -204,7 +204,8 @@ build_profile() {
 
 # 从 `dsh --dump-config` 的 stdout 里精确判定"目标插件行"是否存在。
 #
-# 宿主 dump 规范（dsh 0.1.5-rc.1 对 --dump-config 的实测输出，见 tests/fixtures/real-dump-sample.txt）：
+# 宿主 dump 规范（dsh 0.1.5-rc.1 实测；dsh 0.1.7-rc.1 复测形状不变，见
+# tests/fixtures/real-dump-sample.txt）：
 #   组合树是 YAML 列表，插件行形如
 #     - id: quota-panel              <- 顶层列表项：`-` 在第 0 列
 #       name: dsh-quota-panel        <- 该行的 name 恰好缩进 2 空格、裸值、行尾无内容

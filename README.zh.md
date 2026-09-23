@@ -394,6 +394,24 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 | `>= warnPercent` | warn（琥珀点 + 进度条） |
 | `>= errorPercent` | error（红点 + 进度条） |
 
+## 兼容性
+
+| 宿主线（`@deepseek-ai/dsh`） | 状态 |
+|---|---|
+| `0.1.7-rc.1`（npm `next`） | 已验证：testbed 与 CI boot 门禁固定此版本；逐接缝 diff 记录见 `docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md` |
+| `0.1.5-rc.3`（npm `latest`） | 同一棵代码已验证：testbed L1 + L2 通过（未声明任何 `dsh-*` peer，宿主侧插件版本门禁保持不激活） |
+
+旧线请固定 `0.1.5-rc.3` 而非 `0.1.5-rc.1`：rc.1 对同族包用 `^0.1.5-rc.1` 范围，
+全新全局安装会把 0.1.5-rc.1/rc.3 混装成嵌套布局，导致 `dsh-base` 声明的
+`@deepseek-ai/dsh-sandbox-local` 行解析不到，`dsh web` 在加载任何插件之前就拒绝启动；
+0.1.7-rc.1 把 72 个同族依赖全部精确 pin。
+
+本插件只通过服务与宿主交互——宿主侧 `connection.fetch` / `connection.rpc`、
+`credentials.resolve`，浏览器侧 `slots` / `timer` / `connection` / `locale`——
+且**不声明** `@deepseek-ai/dsh*` peer 依赖。因此它覆盖整条 0.1.x 线，而不是绑定
+某一个宿主构建；某条宿主线是否可用以 `testbed/` 与 CI boot 任务为准
+（见 [`docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md`](docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md)）。
+
 ## 安装
 
 **请安装已发布版本，而不是 `main` 分支。** `main` 承载未经人工确认的

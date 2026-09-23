@@ -7,14 +7,15 @@
 #
 #   tests/capture-real-dump.sh > tests/fixtures/real-dump-sample.txt
 #
-# 采样范围 470-545 是 dsh 0.1.5-rc.1 上该 dump 的尾部（共 545 行，插件行在 540-545）；
-# 换 dsh 版本后行号会漂移，脚本会按实际行数取"最后 10 行必含插件行"的窗口。
+# 采样窗口固定取 dump 尾部 76 行（插件行必在其中）。实测总行数：dsh 0.1.5-rc.1
+# 为 545 行（插件行 540-545），dsh 0.1.7-rc.1 为 1240 行（插件行 1235-1240）；
+# 换 dsh 版本后行号会漂移，脚本按实际行数取"最后 10 行必含插件行"的窗口。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 export DOCKER_CONFIG="$PWD/.docker-config"
 
-docker compose run --rm --build --entrypoint bash testbed -lc '
+docker compose --progress quiet run --rm --build --entrypoint bash testbed -lc '
 set -e
 STEPS=assert,seed,stage,l1,pack,profile /usr/local/bin/testbed-entrypoint >/dev/null 2>&1
 total=$(wc -l < /work/dump-config.txt)

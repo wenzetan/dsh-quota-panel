@@ -303,17 +303,23 @@ function quotaClientUrl(value) {
   if (candidates.length !== 1 || typeof candidates[0].url !== 'string') return undefined
   const url = candidates[0].url.replace(/&amp;/gi, '&')
   const loopbackBase = 'http://127.0.0.1'
-  if (!url.startsWith('/') || url.startsWith('//') || url.includes('\\')) return undefined
+  if (url.startsWith('//') || url.includes('\\')) return undefined
+  // DSH 0.1.7 made app-owned browser routes document-relative, so the boot
+  // graph now advertises `plugins/??<id>/client.js&rev=<rev>` where 0.1.5
+  // advertised the absolute path `/plugins/??<id>/client.js&rev=<rev>`.
+  // Resolve both against the probed page origin (the testbed always fetches
+  // the application root) and hand consumers one absolute path.
+  const resolved = url.startsWith('/') ? url : `/${url}`
   let parsed
   try {
-    parsed = new URL(url, loopbackBase)
+    parsed = new URL(resolved, loopbackBase)
   } catch {
     return undefined
   }
   if (parsed.origin !== loopbackBase) return undefined
   const exactClient = parsed.pathname === '/plugins/dsh-quota-panel/client.js'
   const exactComboClient = parsed.pathname === '/plugins/' && parsed.search.startsWith('??dsh-quota-panel/client.js&')
-  if ((exactClient || exactComboClient) && parsed.searchParams.get('rev')) return url
+  if ((exactClient || exactComboClient) && parsed.searchParams.get('rev')) return resolved
   return undefined
 }
 

@@ -50,7 +50,7 @@ echo "scratch:    $WORK"
 PASS_COUNT=0
 FAIL_COUNT=0
 
-# 宿主 dump 规范（dsh 0.1.5-rc.1 实测）：插件行形如
+# 宿主 dump 规范（dsh 0.1.5-rc.1 实测；dsh 0.1.7-rc.1 复测形状不变）：插件行形如
 #   `- id: quota-panel`
 #   `  name: dsh-quota-panel`      <- name 恰好缩进 2 空格、裸值、行尾无内容
 # 测试用同一锚点从 dump 里取"目标 name 行"，判绿/判红依据行本身而非任意子串。
