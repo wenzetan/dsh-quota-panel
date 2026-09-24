@@ -499,9 +499,9 @@ OpenCode usage (`high = max(rolling, weekly, monthly)`):
 ## Compatibility
 
 **One DSH host line at a time.** This package supports exactly the host line
-its `peerDependencies` pin — currently `@deepseek-ai/dsh@0.1.7-rc.1`
-(npm `next`). The five seam packages it actually talks to are declared as
-exact peers:
+its `peerDependencies` pin — on this maintenance branch
+`@deepseek-ai/dsh@0.1.5-rc.3` (npm `latest`). The five seam packages it
+actually talks to are declared as exact peers:
 
 | Seam package (peer, exact) | Used for |
 |---|---|

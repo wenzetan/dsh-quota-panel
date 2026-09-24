@@ -8,16 +8,16 @@ services:
       context: .
       args:
         NODE_IMAGE: "${GLOBAL_NODE_IMAGE:-node:24-bookworm-slim}"
-        DSH_VERSION: "${DSH_VERSION:-0.1.7-rc.1}"
+        DSH_VERSION: "${DSH_VERSION:-0.1.5-rc.3}"
         NPM_REGISTRY: "${GLOBAL_NPM_REGISTRY:-https://registry.npmjs.org}"
         APT_MIRROR: "${GLOBAL_APT_MIRROR:-}"
         APT_SECURITY_MIRROR: "${GLOBAL_APT_SECURITY_MIRROR:-}"
         HTTP_PROXY: "${GLOBAL_HTTP_PROXY:-}"
         HTTPS_PROXY: "${GLOBAL_HTTPS_PROXY:-}"
         NO_PROXY: "${GLOBAL_NO_PROXY:-}"
-    image: "dsh-testbed-quota-panel:${DSH_VERSION:-0.1.7-rc.1}"
+    image: "dsh-testbed-quota-panel:${DSH_VERSION:-0.1.5-rc.3}"
     environment:
-      DSH_VERSION: "${DSH_VERSION:-0.1.7-rc.1}"
+      DSH_VERSION: "${DSH_VERSION:-0.1.5-rc.3}"
       NPM_CONFIG_REGISTRY: "${GLOBAL_NPM_REGISTRY:-https://registry.npmjs.org}"
       PROFILE_MODE: "${PROFILE_MODE:-minimal}"
       COMPANION: "${COMPANION:-}"

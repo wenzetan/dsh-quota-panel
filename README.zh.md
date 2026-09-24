@@ -397,8 +397,8 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 ## 兼容性
 
 **一次只支持一条宿主线。** 本包只支持它 `peerDependencies` 精确 pin 的宿主线——
-当前为 `@deepseek-ai/dsh@0.1.7-rc.1`（npm `next`）。实际接触的五个接缝包都以精确
-版本声明为 peer：
+本维护分支为 `@deepseek-ai/dsh@0.1.5-rc.3`（npm `latest`）。实际接触的五个接缝包都以
+精确版本声明为 peer：
 
 | 接缝包（peer，精确版本） | 用途 |
 |---|---|

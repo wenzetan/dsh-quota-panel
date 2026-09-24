@@ -98,7 +98,7 @@ test('global Compose ignores a complete China and legacy unscoped environment', 
   const service = serviceOf(config)
 
   assert.equal(config.name, 'dsh-testbed-quota-panel')
-  assert.equal(service.image, 'dsh-testbed-quota-panel:0.1.7-rc.1')
+  assert.equal(service.image, 'dsh-testbed-quota-panel:0.1.5-rc.3')
   assert.equal(service.build.args.NODE_IMAGE, 'node:24-bookworm-slim')
   assert.equal(service.build.args.NPM_REGISTRY, 'https://registry.npmjs.org')
   assert.equal(service.build.args.APT_MIRROR, '')
@@ -160,7 +160,7 @@ test('China Compose ignores a complete global and legacy unscoped environment', 
   const service = serviceOf(config)
 
   assert.equal(config.name, 'dsh-testbed-quota-panel-china')
-  assert.equal(service.image, 'dsh-testbed-quota-panel-china:0.1.7-rc.1')
+  assert.equal(service.image, 'dsh-testbed-quota-panel-china:0.1.5-rc.3')
   assert.equal(service.build.args.NODE_IMAGE, 'docker.m.daocloud.io/library/node:24-bookworm-slim')
   assert.equal(service.build.args.NPM_REGISTRY, 'https://registry.npmmirror.com')
   assert.equal(service.build.args.APT_MIRROR, 'http://mirrors.aliyun.com/debian')

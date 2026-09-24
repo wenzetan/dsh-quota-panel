@@ -14,7 +14,7 @@ services:
         HTTP_PROXY: "${CHINA_HTTP_PROXY:-}"
         HTTPS_PROXY: "${CHINA_HTTPS_PROXY:-}"
         NO_PROXY: "${CHINA_NO_PROXY:-}"
-    image: "dsh-testbed-quota-panel-china:${DSH_VERSION:-0.1.7-rc.1}"
+    image: "dsh-testbed-quota-panel-china:${DSH_VERSION:-0.1.5-rc.3}"
     environment:
       NPM_CONFIG_REGISTRY: "${CHINA_NPM_REGISTRY:-https://registry.npmmirror.com}"
       HTTP_PROXY: "${CHINA_HTTP_PROXY:-}"
