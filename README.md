@@ -525,7 +525,7 @@ records the seam-by-seam diff against the previous line.
 
 ## Versioning and tags
 
-The version string carries the DSH host line plus a local revision:
+The version string carries the DSH host line plus a local revision,
 
 ```
 0.1.7-rc.1-v0.1
@@ -534,9 +534,9 @@ DSH line      └─ local revision (this repo's counter)
 (peer pin)
 ```
 
-* **`package.json#version`** is `<dsh-line>-v<local>` — the full identity minus
-  the `dsh-v` prefix (for example `0.1.7-rc.1-v0.1`).
-* **The git tag** is `dsh-v` + that version: `dsh-v0.1.7-rc.1-v0.1`.
+* **`package.json#version`** is `<dsh-line>-v<local>` (for example
+  `0.1.7-rc.1-v0.1`).
+* **The git tag** is `v` + that version: `v0.1.7-rc.1-v0.1`.
 * **The npm channel mirrors DSH's own dist-tags.** The release job reads
   `npm view @deepseek-ai/dsh dist-tags` and publishes the plugin under the tag
   that currently names the declared host line: a release for dsh `latest`
@@ -563,15 +563,15 @@ unverified work-in-progress; only tagged releases have passed the CI gates
 
 ```sh
 # dsh npm `latest` (0.1.5-rc.3 today) → plugin release tagged
-# dsh-v0.1.5-rc.3-v0.1, published as npm `latest`:
+# v0.1.5-rc.3-v0.1, published as npm `latest`:
 dsh plugin --profile web add dsh-quota-panel
 
 # dsh npm `next` (0.1.7-rc.1 today) → plugin release tagged
-# dsh-v0.1.7-rc.1-v0.1, published as npm `next`:
+# v0.1.7-rc.1-v0.1, published as npm `next`:
 dsh plugin --profile web add dsh-quota-panel@next
 
 # Pin the tag instead (checked on the Releases page):
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0.1"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"
 
 # Restart `dsh web` (bundle layer and client module graph apply at boot)
 ```
@@ -594,7 +594,7 @@ needed.
 
 The release identity and channel rules live in
 [Versioning and tags](#versioning-and-tags). In short: `package.json#version`
-is `<dsh-line>-v<local>`, the tag is `dsh-v<that version>`, and the publish
+is `<dsh-line>-v<local>`, the tag is `v<that version>`, and the publish
 channel mirrors `@deepseek-ai/dsh`'s own dist-tags — `latest` for the shipped
 line (GitHub release, `production` environment reviewer), that line's dist-tag
 for everything else (GitHub pre-release).
@@ -608,7 +608,7 @@ Workflow:
 
 1. **Release the current line (automatic)** — bump `package.json#version`
    (e.g. `0.1.7-rc.1-v0.1`) and push `main`. CI runs the full gates,
-   **auto-tags** `dsh-v0.1.7-rc.1-v0.1` and publishes it under the dist-tag
+   **auto-tags** `v0.1.7-rc.1-v0.1` and publishes it under the dist-tag
    that `@deepseek-ai/dsh` itself currently carries for `0.1.7-rc.1`
    (`next` today). The `classify` job re-derives that mapping at publish
    time, so nothing is hardcoded.
@@ -621,7 +621,7 @@ Workflow:
    approval** before creating the GitHub Release and publishing.
 3. **Verify (human)** — install the pinned tag
    (`dsh plugin --profile web add
-   "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0.1"`, or
+   "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"`, or
    `dsh-quota-panel@latest` / `@next` from npm) and test it for real.
 
 One-time setup:
@@ -678,7 +678,7 @@ This plugin builds on community work — thanks to:
 
 - **0.1.7-rc.1-v0.1** (and its maintenance twin **0.1.5-rc.3-v0.1**) — Adopts the
   DSH-line version scheme: `package.json#version` is `<dsh-line>-v<local>`, the
-  git tag is `dsh-v<that version>`, and the npm channel mirrors
+  git tag is `v<that version>`, and the npm channel mirrors
   `@deepseek-ai/dsh`'s own dist-tags (`0.1.7-rc.1` → `next`, `0.1.5-rc.3` →
   `latest`). The five seam packages are declared as exact-version peers, so a
   DSH 0.1.7+ host's plugin compatibility gate only loads the release built for

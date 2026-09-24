@@ -429,9 +429,8 @@ DSH 线        └─ 本地修订号（本仓库自己的计数器）
 （peer pin）
 ```
 
-* **`package.json#version`** = `<dsh线>-v<本地号>`——完整身份去掉 `dsh-v` 前缀
-  （例如 `0.1.7-rc.1-v0.1`）。
-* **git tag** = `dsh-v` + 该版本号：`dsh-v0.1.7-rc.1-v0.1`。
+* **`package.json#version`** = `<dsh线>-v<本地号>`（例如 `0.1.7-rc.1-v0.1`）。
+* **git tag** = `v` + 该版本号：`v0.1.7-rc.1-v0.1`。
 * **npm 通道跟随 DSH 自己的 dist-tag。** 发布任务读取
   `npm view @deepseek-ai/dsh dist-tags`，把插件发到"当前指向该宿主线"的那个 tag 下：
   面向 dsh `latest`（当前 `0.1.5-rc.3`）的版本发 npm `latest`；面向 dsh `next`
@@ -453,16 +452,16 @@ DSH 线        └─ 本地修订号（本仓库自己的计数器）
 **推荐——安装与你的 DSH 线匹配的那一版：**
 
 ```sh
-# dsh npm `latest`（当前 0.1.5-rc.3）→ 插件 tag dsh-v0.1.5-rc.3-v0.1，
+# dsh npm `latest`（当前 0.1.5-rc.3）→ 插件 tag v0.1.5-rc.3-v0.1，
 # 以 npm `latest` 发布：
 dsh plugin --profile web add dsh-quota-panel
 
-# dsh npm `next`（当前 0.1.7-rc.1）→ 插件 tag dsh-v0.1.7-rc.1-v0.1，
+# dsh npm `next`（当前 0.1.7-rc.1）→ 插件 tag v0.1.7-rc.1-v0.1，
 # 以 npm `next` 发布：
 dsh plugin --profile web add dsh-quota-panel@next
 
 # 也可以直接锁 tag（以 Releases 页面为准）：
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0.1"
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"
 
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
 ```
@@ -480,7 +479,7 @@ dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0
 ### 发布通道与 npm 发布（维护者）
 
 发布身份与通道规则见上面的《版本与 tag 约定》。简言之：`package.json#version` =
-`<dsh线>-v<本地号>`，tag = `dsh-v` + 该版本号，发布通道跟随 `@deepseek-ai/dsh`
+`<dsh线>-v<本地号>`，tag = `v` + 该版本号，发布通道跟随 `@deepseek-ai/dsh`
 自己的 dist-tag——`latest` 线走正式 release（`production` 环境审批人确认），
 其余线走该线自己的 dist-tag（GitHub pre-release）。
 
@@ -493,7 +492,7 @@ dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0
 
 1. **发布当前线（自动）** —— bump `package.json#version`（例如
    `0.1.7-rc.1-v0.1`）推 main。CI 全门禁通过后**自动打 tag**
-   `dsh-v0.1.7-rc.1-v0.1`，并按 `@deepseek-ai/dsh` 当前给 `0.1.7-rc.1`
+   `v0.1.7-rc.1-v0.1`，并按 `@deepseek-ai/dsh` 当前给 `0.1.7-rc.1`
    挂的 dist-tag（今天是 `next`）发布。`classify` 任务在发布时重新推导
    这个映射，没有任何硬编码。
 2. **发布其它宿主线** —— 切到该线的分支（`release/0.1.5-rc.3`），把版本
@@ -503,7 +502,7 @@ dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0
    环境等待人工审批**后才创建 GitHub Release 并发布。
 3. **验证（人工）** —— 安装所锁定的 tag 实测
    （`dsh plugin --profile web add
-   "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0.1"`，或 npm 的
+   "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"`，或 npm 的
    `dsh-quota-panel@latest` / `@next`）。
 
 一次性配置：
@@ -551,7 +550,7 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 ## 更新日志
 
 - **0.1.7-rc.1-v0.1**（及其维护孪生 **0.1.5-rc.3-v0.1**）—— 采用 DSH 线版本规则：
-  `package.json#version` = `<dsh线>-v<本地号>`，git tag = `dsh-v` + 该版本号，
+  `package.json#version` = `<dsh线>-v<本地号>`，git tag = `v` + 该版本号，
   npm 通道跟随 `@deepseek-ai/dsh` 自己的 dist-tag（`0.1.7-rc.1` → `next`，
   `0.1.5-rc.3` → `latest`）。五个接缝包以精确版本声明为 peer，因此 DSH 0.1.7+
   宿主的插件版本门禁只会加载面向它自己那条宿主线的发行版（旧宿主线保留旧插件
