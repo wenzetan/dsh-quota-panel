@@ -648,4 +648,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.promote_tag }}
-        run: gh release edit "$TAG" --prerelease=false --latest
+        # The rule keeps exactly one normal release: the current `latest`.
+        # Promoting a tag therefore demotes every other published release that
+        # is still flagged as a normal release to a pre-release (their tags,
+        # notes and assets stay untouched).
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --prerelease=false --latest
+          gh release list --limit 100 --json tagName,isPrerelease,isLatest \
+            --jq '.[] | select(.isPrerelease == false and .isLatest == false) | .tagName' \
+            | while read -r superseded; do
+                [ -n "$superseded" ] || continue
+                echo "demoting the superseded release: $superseded"
+                gh release edit "$superseded" --prerelease \
+                  || echo "::warning::could not mark $superseded as a pre-release"
+              done
