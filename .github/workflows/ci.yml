@@ -171,10 +171,12 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     steps:
+      # Checkout first: actions/checkout cleans the workspace, so a downloaded
+      # artifact placed before it would be wiped.
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: dist
-      - uses: actions/checkout@v4
       - name: Resolve the DSH host line from the manifest
         id: line
         run: |
