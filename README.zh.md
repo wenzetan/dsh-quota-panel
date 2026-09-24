@@ -550,6 +550,14 @@ manifest（浏览器侧自动进入 `__DSH_BOOT__` 模块图，`immediately: tru
 
 ## 更新日志
 
+- **0.1.7-rc.1-v0.1**（及其维护孪生 **0.1.5-rc.3-v0.1**）—— 采用 DSH 线版本规则：
+  `package.json#version` = `<dsh线>-v<本地号>`，git tag = `dsh-v` + 该版本号，
+  npm 通道跟随 `@deepseek-ai/dsh` 自己的 dist-tag（`0.1.7-rc.1` → `next`，
+  `0.1.5-rc.3` → `latest`）。五个接缝包以精确版本声明为 peer，因此 DSH 0.1.7+
+  宿主的插件版本门禁只会加载面向它自己那条宿主线的发行版（旧宿主线保留旧插件
+  版本）。0.1.7 起 boot 图的客户端 bundle URL 变为 document-relative，testbed
+  探针同时接受两种形态。本条目之前的全部 release 已从 GitHub 删除、在 npm 上
+  deprecate。
 - **v0.9.2-rc.4** —— 修复 GLM Coding Plan 积分套餐的 5h/周泳道对调（issue #7）：
   `CREDIT_LIMIT` 行与 `TOKENS_LIMIT` 行现在共用同一套 `unit`/`number` 窗口声明
   （`unit=3` → 5h 积分窗口，`unit=6` → 周池），不再只按 `nextResetTime` 顺序落位——

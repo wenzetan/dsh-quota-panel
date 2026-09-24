@@ -676,6 +676,16 @@ This plugin builds on community work — thanks to:
 
 ## Changelog
 
+- **0.1.7-rc.1-v0.1** (and its maintenance twin **0.1.5-rc.3-v0.1**) — Adopts the
+  DSH-line version scheme: `package.json#version` is `<dsh-line>-v<local>`, the
+  git tag is `dsh-v<that version>`, and the npm channel mirrors
+  `@deepseek-ai/dsh`'s own dist-tags (`0.1.7-rc.1` → `next`, `0.1.5-rc.3` →
+  `latest`). The five seam packages are declared as exact-version peers, so a
+  DSH 0.1.7+ host's plugin compatibility gate only loads the release built for
+  its own host line (old lines keep their old plugin release). Client bundle
+  URLs in the boot graph are document-relative since 0.1.7 — the testbed
+  probes accept both forms. Every release before this entry was unpublished
+  from GitHub and deprecated on npm.
 - **v0.9.2-rc.4** — Fixes the swapped GLM Coding Plan 5h/weekly lanes on credit
   packages (issue #7): `CREDIT_LIMIT` rows now share the `TOKENS_LIMIT` window
   declaration (`unit=3` → the 5h credit window, `unit=6` → the weekly pool)
