@@ -396,21 +396,53 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 
 ## 兼容性
 
-| 宿主线（`@deepseek-ai/dsh`） | 状态 |
+**一次只支持一条宿主线。** 本包只支持它 `peerDependencies` 精确 pin 的宿主线——
+当前为 `@deepseek-ai/dsh@0.1.7-rc.1`（npm `next`）。实际接触的五个接缝包都以精确
+版本声明为 peer：
+
+| 接缝包（peer，精确版本） | 用途 |
 |---|---|
-| `0.1.7-rc.1`（npm `next`） | 已验证：testbed 与 CI boot 门禁固定此版本；逐接缝 diff 记录见 `docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md` |
-| `0.1.5-rc.3`（npm `latest`） | 同一棵代码已验证：testbed L1 + L2 通过（未声明任何 `dsh-*` peer，宿主侧插件版本门禁保持不激活） |
+| `@deepseek-ai/dsh-client-connection` | 宿主 `connection.fetch` RPC 路由 + 浏览器 `connection.rpc` |
+| `@deepseek-ai/dsh-credentials` | 宿主侧 `credentials.resolve` |
+| `@deepseek-ai/dsh-client-ui-renderer` | 浏览器 `slots` 服务（`shell.overlay` 注册） |
+| `@deepseek-ai/dsh-cordis-client-runner` | 浏览器 `timer` 服务（`ctx.interval`） |
+| `@deepseek-ai/dsh-client-locale` | 浏览器 `locale` 服务（词典） |
 
-旧线请固定 `0.1.5-rc.3` 而非 `0.1.5-rc.1`：rc.1 对同族包用 `^0.1.5-rc.1` 范围，
-全新全局安装会把 0.1.5-rc.1/rc.3 混装成嵌套布局，导致 `dsh-base` 声明的
-`@deepseek-ai/dsh-sandbox-local` 行解析不到，`dsh web` 在加载任何插件之前就拒绝启动；
-0.1.7-rc.1 把 72 个同族依赖全部精确 pin。
+由于这些 peer 是精确版本，**0.1.7 及更新宿主**的插件/宿主版本门禁
+（`evaluatePluginCompatibility`）会拒绝把本包装到其它宿主线上。这是有意为之：
+**旧宿主线由旧插件版本服务**——继续跑当初 pin 了你那条 DSH 线的插件版本（它的
+tag 记录了是哪一条），并与 DSH 同步升级插件。（比 0.1.7 更旧的宿主没有该门禁，
+会直接忽略这份声明；它们不在支持与验证范围内。）
 
-本插件只通过服务与宿主交互——宿主侧 `connection.fetch` / `connection.rpc`、
-`credentials.resolve`，浏览器侧 `slots` / `timer` / `connection` / `locale`——
-且**不声明** `@deepseek-ai/dsh*` peer 依赖。因此它覆盖整条 0.1.x 线，而不是绑定
-某一个宿主构建；某条宿主线是否可用以 `testbed/` 与 CI boot 任务为准
-（见 [`docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md`](docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md)）。
+当前宿主线的验证在 testbed 与 CI boot 门禁里；
+[`docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md`](docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md)
+记录了相对上一条宿主线的逐接缝 diff。
+
+## 版本与 tag 约定
+
+版本串同时携带 DSH 宿主线和本地修订号：
+
+```
+0.1.7-rc.1-v0.1
+└────┬────┘ └┬┘
+DSH 线        └─ 本地修订号（本仓库自己的计数器）
+（peer pin）
+```
+
+* **`package.json#version`** = `<dsh线>-v<本地号>`——完整身份去掉 `dsh-v` 前缀
+  （例如 `0.1.7-rc.1-v0.1`）。
+* **git tag** = `dsh-v` + 该版本号：`dsh-v0.1.7-rc.1-v0.1`。
+* **npm 通道跟随 DSH 自己的 dist-tag。** 发布任务读取
+  `npm view @deepseek-ai/dsh dist-tags`，把插件发到"当前指向该宿主线"的那个 tag 下：
+  面向 dsh `latest`（当前 `0.1.5-rc.3`）的版本发 npm `latest`；面向 dsh `next`
+  （当前 `0.1.7-rc.1`）的版本发 npm `next`；没有任何 dist-tag 指向的宿主线回退到
+  `next`。GitHub Release 同样分流：`latest` 走正式 release（由 `production`
+  环境的审批人确认），其余走 pre-release。
+* 维护线的版本从该线自己的分支（`release/0.1.5-rc.3`）手工推 tag 或
+  `workflow_dispatch` 时传 `release: true` 来发；`main` 只自动打自己这条线的 tag。
+
+宿主线 pin 在 `peerDependencies` 里，所以一条 DSH 线对应一条插件线：旧宿主线保留
+它当年的插件版本，插件与 DSH 一起升级。
 
 ## 安装
 
@@ -418,26 +450,25 @@ OpenCode 用量（`high = max(滚动, 每周, 每月)`）：
 开发中内容；只有打了 tag 的版本才通过了 CI 门禁（check + boot），正式版
 还经过了人工审批门禁。
 
-**推荐——最新正式版（或当前迭代周期的预发布版）：**
+**推荐——安装与你的 DSH 线匹配的那一版：**
 
 ```sh
-# 锁定最新正式版 tag（以 Releases 页面为准）
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.8.0"
-
-# 或配置好仓库 secret NPM_TOKEN 后（见下），按包名安装——
-# npm `latest` 始终指向最近一个经人工确认的正式版：
+# dsh npm `latest`（当前 0.1.5-rc.3）→ 插件 tag dsh-v0.1.5-rc.3-v0.1，
+# 以 npm `latest` 发布：
 dsh plugin --profile web add dsh-quota-panel
+
+# dsh npm `next`（当前 0.1.7-rc.1）→ 插件 tag dsh-v0.1.7-rc.1-v0.1，
+# 以 npm `next` 发布：
+dsh plugin --profile web add dsh-quota-panel@next
+
+# 也可以直接锁 tag（以 Releases 页面为准）：
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0.1"
+
 # 重启 `dsh web`（bundle 层与 client 模块图在启动时生效）
 ```
 
-**需要最新预发布版时**（例如测试当前 `0.8.0-rc.N` 迭代）：
-
-```sh
-# 锁定预发布 tag
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"
-# 或从 npm 的 `next` dist-tag 安装：
-dsh plugin --profile web add dsh-quota-panel@next
-```
+用 `npm view @deepseek-ai/dsh dist-tags` 看你的 DSH 线挂在哪个 tag 下，再装对应的
+插件通道——版本规则见《版本与 tag 约定》。
 
 > **避免裸 `github:wenzetan/dsh-quota-panel`**（不带 `#tag`）——它跟踪
 > `main` HEAD，即测试分支：可能携带未发布的功能、未过 CI 甚至坏掉的
@@ -448,30 +479,32 @@ dsh plugin --profile web add dsh-quota-panel@next
 
 ### 发布通道与 npm 发布（维护者）
 
-版本即通道——package.json 里的版本字符串决定发布行为：
+发布身份与通道规则见上面的《版本与 tag 约定》。简言之：`package.json#version` =
+`<dsh线>-v<本地号>`，tag = `dsh-v` + 该版本号，发布通道跟随 `@deepseek-ai/dsh`
+自己的 dist-tag——`latest` 线走正式 release（`production` 环境审批人确认），
+其余线走该线自己的 dist-tag（GitHub pre-release）。
 
-| package.json 版本 | 通道 | 门禁 | GitHub Release | npm dist-tag |
-|---|---|---|---|---|
-| `0.8.0-rc.1`（任何 `-` 后缀） | 预发布 | 仅 CI（check + boot） | 标记 **pre-release** | `next` |
-| `0.8.0`（纯 `X.Y.Z`） | 正式 | CI **+ 人工审批** | 正式 release | `latest` |
+| package.json 版本 | 对应的 dsh 线 | 通道 | 门禁 | GitHub Release | npm dist-tag |
+|---|---|---|---|---|---|
+| `0.1.7-rc.1-v0.1` | dsh `next` | 该线的 dist-tag | 仅 CI（check + boot） | 标记 **pre-release** | `next` |
+| `0.1.5-rc.3-v0.1` | dsh `latest` | 该线的 dist-tag | CI **+ 人工审批** | 正式 release | `latest` |
 
 流程：
 
-1. **迭代（自动）** —— bump 到 `0.8.0-rc.1` 推 main。CI 全门禁通过后
-   **自动打 tag** `v0.8.0-rc.1` 并发布预发布版（快速通道，无需审批）。
-   预发布发布到 npm `next` dist-tag，且**永远不会占有 `latest`**——
-   若 npm 曾把 `latest` 指向预发布，re-claim 步骤会把它重新指回最新
-   正式版——`dsh plugin add dsh-quota-panel` 始终解析到上一个已验证的
-   正式版。
-2. **验证（人工）** —— 安装 rc 实测（`dsh plugin --profile web add
-   "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"`，或 npm 的
-   `dsh-quota-panel@0.8.0-rc.1`）。
-3. **转正（手动，正式版必经）** —— 正式版**永远不会自动打 tag**。
-   在 Actions 页面运行 CI 工作流，把 **`rc_tag`** 输入设为已验证的
-   预发布 tag（如 `v0.8.0-rc.1`）。`promote` 任务会校验该 tag 的 CI 在
-   同一提交上通过，然后在同一提交上创建正式版孪生 tag `v0.8.0` 并
-   派发发布运行。稳定发布任务随后**停在 `production` 环境等待人工
-   审批**——确认后才创建 GitHub Release 并发布到 npm `latest`。
+1. **发布当前线（自动）** —— bump `package.json#version`（例如
+   `0.1.7-rc.1-v0.1`）推 main。CI 全门禁通过后**自动打 tag**
+   `dsh-v0.1.7-rc.1-v0.1`，并按 `@deepseek-ai/dsh` 当前给 `0.1.7-rc.1`
+   挂的 dist-tag（今天是 `next`）发布。`classify` 任务在发布时重新推导
+   这个映射，没有任何硬编码。
+2. **发布其它宿主线** —— 切到该线的分支（`release/0.1.5-rc.3`），把版本
+   bump 成 `0.1.5-rc.3-v0.1`，然后手工推 tag，或在该分支上运行 CI 工作流
+   并传 `release: true`。发布任务会按 dsh 自己给该线挂的 tag 发布——
+   `0.1.5-rc.3` 是 `latest`——且 `release-latest` 任务**停在 `production`
+   环境等待人工审批**后才创建 GitHub Release 并发布。
+3. **验证（人工）** —— 安装所锁定的 tag 实测
+   （`dsh plugin --profile web add
+   "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0.1"`，或 npm 的
+   `dsh-quota-panel@latest` / `@next`）。
 
 一次性配置：
 

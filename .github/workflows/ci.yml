@@ -24,36 +24,42 @@
 #         from the seeded credential — proving the v0.5+ catalog probe
 #         pipeline works end-to-end in a genuine boot.
 #
-# tag:  PRE-RELEASE versions (X.Y.Z-rc.N) are auto-tagged from main after
-#         check+boot pass and dispatched to the release run. STABLE versions
-#         (plain X.Y.Z) are never auto-tagged: a human promotes a green rc
-#         via the workflow_dispatch `rc_tag` input (promote job), which
-#         creates the stable twin tag on the same commit and dispatches the
-#         release run.
+# tag:  main pushes are auto-tagged after check+boot pass: the tag is
+#         `dsh-v<package.json version>` (the version string itself carries the
+#         DSH host line and the local revision, e.g. 0.1.7-rc.1-v0.1 →
+#         dsh-v0.1.7-rc.1-v0.1), and the release run is dispatched on it.
+#         Releases for other host lines are cut from their own maintenance
+#         branch by pushing the tag by hand (or via the `release` dispatch
+#         input); main only ever tags its own line.
 #
-# release: on the v* tag (from the tag job / promote job or by hand) —
-#         re-runs check+boot on the exact tag, then publishes along one of
-#         two channels picked by the version string: -rc.N/-beta.N suffixes
-#         go to the pre-release channel (GitHub prerelease + npm dist-tag
-#         `next`, no approval needed; a reclaim step keeps `latest` off
-#         prereleases); plain X.Y.Z goes to the stable channel (GitHub
-#         `production` environment with a required reviewer = the human
-#         confirmation, npm dist-tag `latest`). A broken build can
-#         therefore never become what a bare install resolves to.
+# release: on a `dsh-v*` tag (auto-tagged or pushed by hand) — re-runs
+#         check+boot on the exact tag, then publishes along the channel the
+#         DSH host line itself rides: the `classify` job reads
+#         `@deepseek-ai/dsh`'s own npm dist-tags, so a release whose host line
+#         is npm `latest` publishes as npm `latest` (GitHub release, gated by
+#         the `production` environment's required reviewer), and every other
+#         line publishes under that line's dist-tag (GitHub pre-release, no
+#         approval). A broken build can therefore never become what a bare
+#         install resolves to.
+#
+# boot resolves the host line from package.json's exact `@deepseek-ai/dsh*`
+#         peers, so each line's release is gated against the dsh version it
+#         declares rather than a hardcoded one.
 
 name: CI
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['dsh-v*']
   pull_request:
   workflow_dispatch:
     inputs:
-      rc_tag:
-        description: 'Promote a green pre-release tag to its stable twin on the same commit (e.g. v0.9.0-rc.3 -> v0.9.0). Leave empty to only run check + boot.'
+      release:
+        description: 'Create and push the release tag for package.json#version on this ref (e.g. dsh-v0.1.5-rc.3-v0.1). Leave false to only run check + boot.'
         required: false
-        type: string
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -168,17 +174,34 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: dist
+      - uses: actions/checkout@v4
+      - name: Resolve the DSH host line from the manifest
+        id: line
+        run: |
+          set -euo pipefail
+          DSH_VERSION="$(node -e '
+            const p = require("./package.json")
+            const versions = [...new Set(Object.keys(p.peerDependencies ?? {})
+              .filter((name) => name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-"))
+              .map((name) => p.peerDependencies[name]))]
+            if (versions.length !== 1) {
+              console.error("expected exactly one declared DSH host line, got " + JSON.stringify(versions))
+              process.exit(1)
+            }
+            process.stdout.write(versions[0])
+          ')"
+          echo "dsh_version=$DSH_VERSION" >> "$GITHUB_OUTPUT"
+          echo "boot gate rides @deepseek-ai/dsh@$DSH_VERSION (from package.json peers)"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - name: Install dsh and pnpm
-        # Pin the host line this checkout is verified against: npm's `latest`
-        # dist-tag still points at the 0.1.5-rc line, so an unpinned install
-        # would silently test a different host than the testbed and docs pin.
+        # The host line comes from the checkout's own peers, so a maintenance
+        # branch releasing against an older dsh is gated against that version.
         # --registry=npmmirror: same npmjs CDN stale-packument workaround as
         # the plugin_check step (@deepseek-ai/* deps hit EINTEGRITY on the
         # default registry since the 2026-08-21 bulk republish). REVERT later.
-        run: npm install -g --registry=https://registry.npmmirror.com @deepseek-ai/dsh@0.1.7-rc.1 pnpm
+        run: npm install -g --registry=https://registry.npmmirror.com "@deepseek-ai/dsh@${{ steps.line.outputs.dsh_version }}" pnpm
       - name: Install the packed tarball into a fresh web profile
         run: |
           set -euo pipefail
@@ -370,16 +393,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Resolve version and channel from package.json
+      - name: Resolve the release tag from package.json
         id: ver
+        # Tag rule: `dsh-v<package.json version>` — the version string already
+        # carries the host line and the local revision (0.1.7-rc.1-v0.1 →
+        # dsh-v0.1.7-rc.1-v0.1). The channel is resolved later, from the dsh
+        # line's own npm dist-tags (see the classify job).
         run: |
-          v="v$(node -p "require('./package.json').version")"
+          set -euo pipefail
+          v="dsh-v$(node -p "require('./package.json').version")"
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          if [[ "$v" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "auto-tag: $v"
       - name: Check whether the tag already exists
         id: check
         run: |
@@ -389,8 +413,8 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Create and push the pre-release tag
-        if: steps.check.outputs.exists == 'false' && steps.ver.outputs.prerelease == 'true'
+      - name: Create and push the release tag
+        if: steps.check.outputs.exists == 'false'
         env:
           TAG: ${{ steps.ver.outputs.version }}
         run: |
@@ -398,147 +422,103 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
-      # A tag pushed with GITHUB_TOKEN does NOT trigger the tags:['v*']
+      # A tag pushed with GITHUB_TOKEN does NOT trigger the tags:['dsh-v*']
       # workflow (GitHub's recursion guard), so the release jobs would never
       # run. Dispatch the release run on the new tag explicitly.
       - name: Trigger the release run on the new tag
-        if: steps.check.outputs.exists == 'false' && steps.ver.outputs.prerelease == 'true'
+        if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.ver.outputs.version }}
         run: gh workflow run ci.yml --ref "$TAG"
 
-  # Manual promotion: the human confirmation step for stable versions.
-  # Dispatch with `rc_tag` set (e.g. v0.9.0-rc.3) — promotes that rc:
-  #   1. peel the (annotated) rc tag to its commit and require that tag's
-  #      own CI run (the one the tag job dispatched) to be green;
-  #   2. require the rc commit to be an ancestor of main and main to differ
-  #      from it ONLY under .github/ (otherwise cut a fresh rc first —
-  #      stable must not ship code that never went through an rc);
-  #   3. push a VERSION-ONLY bump commit on top of main (npm refuses to
-  #      publish a prerelease version to latest, and a stable release must
-  #      ship the plain version) and tag it v0.9.0.
-  # The bump rides on main rather than a detached twin because GITHUB_TOKEN
-  # (a GitHub App) can never push a ref whose workflow files differ from
-  # the default branch — the `workflows` scope does not exist for
-  # GITHUB_TOKEN — and an rc commit usually predates later workflow fixes.
-  # If the `production` environment has a required reviewer, release-stable
-  # waits there for a second, explicit approval.
-  promote:
-    if: github.event_name == 'workflow_dispatch' && inputs.rc_tag != ''
+  # Manual tag cut for a maintenance line: dispatch with `release` on the
+  # branch that carries the version to publish (e.g. release/0.1.5-rc.3).
+  # Same dance as the auto-tag job — create the annotated tag, push it, then
+  # dispatch the release run on it (a GITHUB_TOKEN push never triggers the
+  # tags:['dsh-v*'] workflow by itself).
+  release-tag:
+    needs: [check, boot]
+    if: github.event_name == 'workflow_dispatch' && inputs.release
     runs-on: ubuntu-latest
     permissions:
-      actions: write  # gh run list + gh workflow run (verify CI, dispatch release)
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Validate the rc tag and create its stable twin
-        id: promote
+      - name: Create and push the release tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RC: ${{ inputs.rc_tag }}
         run: |
           set -euo pipefail
-          if ! [[ "$RC" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.]+$ ]]; then
-            echo "::error::$RC is not a pre-release tag (expected vX.Y.Z-rc.N or similar)"
-            exit 1
-          fi
-          STABLE="v${RC#v}"; STABLE="${STABLE%%-*}"
-          STABLE_VER="${STABLE#v}"
-          # Annotated tags (all tags this workflow's tag job creates via
-          # `git tag -a`) make git/ref/tags/X return the TAG OBJECT sha,
-          # not the commit; peel it so the CI lookup targets the commit
-          # the rc actually tested.
-          TAGOBJ="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RC}" --jq '.object.sha')"
-          TAGTYPE="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RC}" --jq '.object.type')"
-          if [ "$TAGTYPE" = "tag" ]; then
-            SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${TAGOBJ}" --jq '.object.sha')"
-          else
-            SHA="$TAGOBJ"
-          fi
-          echo "promoting $RC (commit $SHA) -> $STABLE"
-          # Look up CI on the rc TAG's own run (--branch "$RC": the tag job
-          # dispatches one right after creating each rc tag, so its
-          # head_branch is the tag name). Filtering by commit alone would
-          # match THIS promote run itself — dispatched on main — and read
-          # its own in-flight conclusion: a deadlock that could never pass.
-          CONCLUSION="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow CI --branch "$RC" --limit 1 --json conclusion --jq '.[0].conclusion // "none"')"
-          if [ "$CONCLUSION" != "success" ]; then
-            echo "::error::CI for $RC is '$CONCLUSION' (need success) — fix or re-tag before promoting"
-            exit 1
-          fi
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${STABLE}" >/dev/null 2>&1; then
-            echo "::error::$STABLE already exists — bump the version instead"
-            exit 1
-          fi
-          git fetch origin main
-          MAIN_SHA="$(git rev-parse origin/main)"
-          if ! git merge-base --is-ancestor "$SHA" "$MAIN_SHA"; then
-            echo "::error::$RC's commit is not on main (rebased away?) — re-cut the rc"
-            exit 1
-          fi
-          # Stable must ship rc-validated code: main may only differ from the
-          # rc under .github/ (workflow fixes); anything else needs a fresh rc.
-          NON_CI_CHANGES="$(git diff --name-only "$SHA" "$MAIN_SHA" -- . ':!.github')"
-          if [ -n "$NON_CI_CHANGES" ]; then
-            echo "::error::main has changes beyond $RC outside .github/:"$'\n'"$NON_CI_CHANGES"$'\n'"Cut a new rc that includes them before promoting."
-            exit 1
-          fi
+          TAG="dsh-v$(node -p "require('./package.json').version")"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B promote "$MAIN_SHA"
-          # Version-only bump on top of main. The surgical replace keeps the
-          # diff to the single version line (re-serializing would churn it).
-          if ! grep -q "\"version\": \"$STABLE_VER\"" package.json; then
-            if ! sed -i "s/\"version\": \"[0-9][^\"]*\"/\"version\": \"$STABLE_VER\"/" package.json; then
-              echo "::error::failed to set version $STABLE_VER in package.json"
-              exit 1
-            fi
-          fi
-          if git diff --quiet -- package.json; then
-            echo "::error::package.json on main already reads $STABLE_VER but $STABLE is absent — investigate manually"
+          git fetch --tags origin
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            echo "::error::tag $TAG already exists"
             exit 1
           fi
-          git add package.json
-          git commit -m "$STABLE: promote $RC to stable (version-only)"
-          # Non-FF failures here mean main moved concurrently — retry the dispatch.
-          git push origin HEAD:main
-          STABLE_SHA="$(git rev-parse HEAD)"
-          git tag -a "$STABLE" -m "Release $STABLE (promotes $RC; version-only bump on main)" "$STABLE_SHA"
-          git push origin "$STABLE"
-          echo "stable_tag=$STABLE" >> "$GITHUB_OUTPUT"
-      - name: Trigger the release run on the stable tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          STABLE: ${{ steps.promote.outputs.stable_tag }}
-        run: gh workflow run ci.yml --ref "$STABLE"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          gh workflow run ci.yml --ref "$TAG"
 
-  # ── Release channels ──────────────────────────────────────────────────
-  # Both jobs run on the v* tag push (created by the tag job above or by
-  # hand) after check + boot re-verify the exact tag. The version string
-  # picks the channel:
-  #
-  #   v0.8.0-rc.1  (any -suffix)  → PRE-RELEASE channel:
-  #     GitHub Release flagged --prerelease, npm published under the
-  #     `next` dist-tag. Nothing here can touch `latest`, so a broken
-  # build never becomes what `dsh plugin add dsh-quota-panel` resolves to.
-  #     No manual approval — fast iteration.
-  #
-  #   v0.8.0       (plain X.Y.Z)  → STABLE channel:
-  #     uses the `production` GitHub environment. Configure that
-  #     environment (Settings → Environments → production) with a required
-  #     reviewer and the job WAITS for the human confirmation before
-  #     creating the GitHub Release and publishing to npm `latest`.
-  #     Promote an rc to stable by bumping package.json to the plain
-  #     version and pushing — CI re-gates everything from scratch.
-  #
-  # In both channels the published tarball is the exact artifact that
-  # passed check + boot on that tag.
+  # Which channel does this release ride? One line of indirection: the plugin
+  # mirrors the dist-tag @deepseek-ai/dsh itself carries for the host line the
+  # checkout declares. dsh `latest` -> npm `latest` (GitHub release, the
+  # production environment's reviewer confirms); dsh `next`/`alpha` -> that
+  # dist-tag (GitHub pre-release, no approval); a line no dist-tag points at
+  # falls back to `next`.
+  classify:
+    if: startsWith(github.ref, 'refs/tags/dsh-v')
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.channel.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Resolve the npm dist-tag for the declared host line
+        id: channel
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          DSH_VERSION="$(node -e '
+            const p = require("./package.json")
+            const versions = [...new Set(Object.keys(p.peerDependencies ?? {})
+              .filter((name) => name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-"))
+              .map((name) => p.peerDependencies[name]))]
+            if (versions.length !== 1) {
+              console.error("expected exactly one declared DSH host line, got " + JSON.stringify(versions))
+              process.exit(1)
+            }
+            process.stdout.write(versions[0])
+          ')"
+          if [ "${{ github.ref_name }}" != "dsh-v$VERSION" ]; then
+            echo "::error::tag ${{ github.ref_name }} does not match package.json version dsh-v$VERSION"
+            exit 1
+          fi
+          TAGS="$(npm view @deepseek-ai/dsh dist-tags --json)"
+          CHANNEL="$(node -e '
+            const raw = JSON.parse(process.argv[1])
+            const tags = Array.isArray(raw) ? (raw[0] ?? {}) : raw
+            const want = process.argv[2]
+            for (const tag of ["latest", "next", "alpha"]) {
+              if (tags[tag] === want) { process.stdout.write(tag); process.exit(0) }
+            }
+            process.stdout.write("next")
+          ' "$TAGS" "$DSH_VERSION")"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "release dsh-v$VERSION rides npm dist-tag: $CHANNEL (host line @deepseek-ai/dsh@$DSH_VERSION)"
+
+  # Pre-release channel: every host line that is not dsh's own npm `latest`.
+  # GitHub pre-release, npm publish under the line's dist-tag, no approval.
   release-pre:
-    needs: [check, boot]
-    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-')
+    needs: [check, boot, classify]
+    if: startsWith(github.ref, 'refs/tags/dsh-v') && needs.classify.outputs.channel != 'latest'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -564,38 +544,20 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      # --tag next is the whole point: a pre-release must never become
-      # what a bare `npm install dsh-quota-panel` / `dsh plugin add` resolves to.
-      - name: Publish to npm under the next dist-tag (only when NPM_TOKEN is configured)
+      # The dist-tag is the classify job's answer, never a hardcoded `next`:
+      # a maintenance line publishes under whatever tag dsh itself carries.
+      - name: Publish to npm under the line's dist-tag (only when NPM_TOKEN is configured)
         if: env.NPM_TOKEN != ''
-        run: npm publish dsh-quota-panel-*.tgz --access public --tag next
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      # npm assigns the `latest` dist-tag to the VERY FIRST version published
-      # even when publishing under --tag next (npm quirk). latest cannot be
-      # deleted (403) — only re-assigned; re-claim it to the newest stable
-      # already on the registry, or warn when none exists yet.
-      - name: Prerelease must not own the latest dist-tag
-        if: env.NPM_TOKEN != ''
-        run: |
-          LATEST="$(npm dist-tag ls dsh-quota-panel | sed -n 's/^latest: //p')"
-          if [ -n "$LATEST" ] && [[ "$LATEST" == *-* ]]; then
-            STABLE="$(npm dist-tag ls dsh-quota-panel | sed -n 's/^[^:]*: //p' | grep -v -- '-' | sort -V | tail -1)"
-            if [ -n "$STABLE" ]; then
-              npm dist-tag add "dsh-quota-panel@$STABLE" latest
-              echo "re-claimed latest: $LATEST -> $STABLE"
-            else
-              echo "::warning::latest=$LATEST is a prerelease and no stable exists yet — the next stable release re-claims latest"
-            fi
-          else
-            echo "latest untouched (${LATEST:-<unset>})"
-          fi
+        run: npm publish dsh-quota-panel-*.tgz --access public --tag "${{ needs.classify.outputs.channel }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  release-stable:
-    needs: [check, boot]
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+  # Shipped channel: the host line dsh itself publishes as `latest`. GitHub
+  # release, npm `latest`, and the `production` environment's required
+  # reviewer is the human confirmation before anything moves.
+  release-latest:
+    needs: [check, boot, classify]
+    if: startsWith(github.ref, 'refs/tags/dsh-v') && needs.classify.outputs.channel == 'latest'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -624,6 +586,6 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: Publish to npm under the latest dist-tag (only when NPM_TOKEN is configured)
         if: env.NPM_TOKEN != ''
-        run: npm publish dsh-quota-panel-*.tgz --access public
+        run: npm publish dsh-quota-panel-*.tgz --access public --tag latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

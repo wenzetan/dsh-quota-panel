@@ -498,53 +498,87 @@ OpenCode usage (`high = max(rolling, weekly, monthly)`):
 
 ## Compatibility
 
-| Host line (`@deepseek-ai/dsh`) | Status |
+**One DSH host line at a time.** This package supports exactly the host line
+its `peerDependencies` pin — currently `@deepseek-ai/dsh@0.1.7-rc.1`
+(npm `next`). The five seam packages it actually talks to are declared as
+exact peers:
+
+| Seam package (peer, exact) | Used for |
 |---|---|
-| `0.1.7-rc.1` (npm `next`) | Verified: testbed + CI boot gate pin this version; `docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md` records the seam-by-seam diff |
-| `0.1.5-rc.3` (npm `latest`) | Verified with the same tree: testbed L1 + L2 pass (no `dsh-*` peer is declared, so the host-side plugin version gate stays inactive) |
+| `@deepseek-ai/dsh-client-connection` | host `connection.fetch` RPC routes + browser `connection.rpc` |
+| `@deepseek-ai/dsh-credentials` | host-side `credentials.resolve` |
+| `@deepseek-ai/dsh-client-ui-renderer` | browser `slots` service (`shell.overlay` registration) |
+| `@deepseek-ai/dsh-cordis-client-runner` | browser `timer` service (`ctx.interval`) |
+| `@deepseek-ai/dsh-client-locale` | browser `locale` service (dictionaries) |
 
-Pin `0.1.5-rc.3`, not `0.1.5-rc.1`: the rc.1 release resolves its family
-dependencies through `^0.1.5-rc.1` ranges, and a fresh global install mixes
-0.1.5-rc.1/rc.3 layouts until `@deepseek-ai/dsh-sandbox-local` (a row declared
-by `dsh-base`) can no longer be resolved, so `dsh web` refuses to boot before
-any plugin is involved. 0.1.7-rc.1 pins all 72 family dependencies exactly.
+Because those peers are exact versions, a DSH 0.1.7-or-newer host's plugin/host
+compatibility gate (`evaluatePluginCompatibility`) refuses to install or boot
+this package on any other host line. That is intentional: **old host lines are
+served by old plugin versions.** Keep running the release that pinned your DSH
+version — its tag records which one — and upgrade the plugin together with DSH.
+(Host lines older than 0.1.7 have no such gate and simply ignore the
+declaration; they are not tested or supported.)
 
-The plugin talks to the host through services only — `connection.fetch` /
-`connection.rpc`, `credentials.resolve`, and on the browser side
-`slots` / `timer` / `connection` / `locale` — and declares no
-`@deepseek-ai/dsh*` peer dependency. It therefore rides the whole 0.1.x line
-instead of one exact host build; `testbed/` and the CI boot job are the
-authoritative checks for a host line (see
-[`docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md`](docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md)).
+Verification for the current line lives in the testbed and the CI boot gate;
+[`docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md`](docs/2026-09-24-dsh-0.1.7-rc.1-assessment.md)
+records the seam-by-seam diff against the previous line.
+
+## Versioning and tags
+
+The version string carries the DSH host line plus a local revision:
+
+```
+0.1.7-rc.1-v0.1
+└────┬────┘ └┬┘
+DSH line      └─ local revision (this repo's counter)
+(peer pin)
+```
+
+* **`package.json#version`** is `<dsh-line>-v<local>` — the full identity minus
+  the `dsh-v` prefix (for example `0.1.7-rc.1-v0.1`).
+* **The git tag** is `dsh-v` + that version: `dsh-v0.1.7-rc.1-v0.1`.
+* **The npm channel mirrors DSH's own dist-tags.** The release job reads
+  `npm view @deepseek-ai/dsh dist-tags` and publishes the plugin under the tag
+  that currently names the declared host line: a release for dsh `latest`
+  (today `0.1.5-rc.3`) goes to npm `latest`; a release for dsh `next`
+  (today `0.1.7-rc.1`) goes to npm `next`. A line no dist-tag points at falls
+  back to `next`. GitHub releases follow the same split: `latest` → normal
+  release gated by the `production` environment's reviewer, everything else →
+  pre-release.
+* Releases for a maintenance line are cut from that line's branch
+  (`release/0.1.5-rc.3`) by pushing the tag by hand or dispatching the CI
+  workflow with `release: true`; `main` only ever auto-tags its own line.
+
+Because the host line is pinned in `peerDependencies`, one DSH line gets one
+plugin line: old host lines keep their old plugin release, and the plugin is
+upgraded together with DSH.
 
 ## Install
 
 **Install a released version — not the `main` branch.** `main` receives
 unverified work-in-progress; only tagged releases have passed the CI gates
-(check + boot) and — for stable versions — the human approval gate.
+(check + boot) and — for the shipped line — the human approval gate.
 
-**Recommended — the latest stable release (or the latest pre-release for the
-current iteration cycle):**
+**Recommended — the release that matches your DSH line:**
 
 ```sh
-# Pin the latest stable release tag (checked on the Releases page)
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.8.0"
-
-# Or, once the repo secret NPM_TOKEN is configured (see below), by name —
-# npm `latest` always resolves to the last human-approved stable:
+# dsh npm `latest` (0.1.5-rc.3 today) → plugin release tagged
+# dsh-v0.1.5-rc.3-v0.1, published as npm `latest`:
 dsh plugin --profile web add dsh-quota-panel
+
+# dsh npm `next` (0.1.7-rc.1 today) → plugin release tagged
+# dsh-v0.1.7-rc.1-v0.1, published as npm `next`:
+dsh plugin --profile web add dsh-quota-panel@next
+
+# Pin the tag instead (checked on the Releases page):
+dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0.1"
+
 # Restart `dsh web` (bundle layer and client module graph apply at boot)
 ```
 
-**When you want the latest pre-release** (e.g. testing the current
-`0.8.0-rc.N` iteration):
-
-```sh
-# Pin the pre-release tag
-dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"
-# Or from npm under the `next` dist-tag:
-dsh plugin --profile web add dsh-quota-panel@next
-```
+Check `npm view @deepseek-ai/dsh dist-tags` to see which tag your DSH line
+rides, then install the matching plugin channel — the version rule is in
+[Versioning and tags](#versioning-and-tags).
 
 > **Avoid bare `github:wenzetan/dsh-quota-panel`** (no `#tag`) — it tracks
 > `main` HEAD, which is the testing branch: it may carry unreleased work,
@@ -558,33 +592,37 @@ needed.
 
 ### Release channels & npm publishing (maintainer)
 
-Versioning policy — the version string picks the channel:
+The release identity and channel rules live in
+[Versioning and tags](#versioning-and-tags). In short: `package.json#version`
+is `<dsh-line>-v<local>`, the tag is `dsh-v<that version>`, and the publish
+channel mirrors `@deepseek-ai/dsh`'s own dist-tags — `latest` for the shipped
+line (GitHub release, `production` environment reviewer), that line's dist-tag
+for everything else (GitHub pre-release).
 
-| package.json version | Channel | Gate | GitHub Release | npm dist-tag |
-|---|---|---|---|---|
-| `0.8.0-rc.1` (any `-suffix`) | pre-release | CI only (check + boot) | flagged **pre-release** | `next` |
-| `0.8.0` (plain `X.Y.Z`) | stable | CI **+ human approval** | normal release | `latest` |
+| package.json version | Host line it pins | Channel | Gate | GitHub Release | npm dist-tag |
+|---|---|---|---|---|---|
+| `0.1.7-rc.1-v0.1` | dsh `next` | that line's tag | CI only (check + boot) | flagged **pre-release** | `next` |
+| `0.1.5-rc.3-v0.1` | dsh `latest` | that line's tag | CI **+ human approval** | normal release | `latest` |
 
 Workflow:
 
-1. **Iterate (automatic)** — bump to `0.8.0-rc.1` and push main. CI runs
-   the full gates, **auto-tags** `v0.8.0-rc.1` and publishes the
-   pre-release (fast lane, no approval). A pre-release is published under
-   the npm `next` dist-tag and can never own `latest` — a reclaim step
-   re-claims `latest` to the newest stable if npm ever pointed it at a
-   prerelease — so `dsh plugin add dsh-quota-panel` keeps resolving to the
-   last verified stable.
-2. **Verify (human)** — install the rc (`dsh plugin --profile web add
-   "github:wenzetan/dsh-quota-panel#v0.8.0-rc.1"`, or
-   `dsh-quota-panel@0.8.0-rc.1` from npm) and test it for real.
-3. **Promote (manual, required for stable)** — stable versions are NEVER
-   auto-tagged. On the Actions page, run the CI workflow with the
-   **`rc_tag`** input set to the green pre-release tag (e.g.
-   `v0.8.0-rc.1`). The `promote` job verifies that tag's CI run passed on
-   exactly that commit, creates the stable twin `v0.8.0` on the same
-   commit and dispatches the release run. The stable release job then
-   **waits in the `production` environment for a human approval** before
-   creating the GitHub Release and publishing to npm `latest`.
+1. **Release the current line (automatic)** — bump `package.json#version`
+   (e.g. `0.1.7-rc.1-v0.1`) and push `main`. CI runs the full gates,
+   **auto-tags** `dsh-v0.1.7-rc.1-v0.1` and publishes it under the dist-tag
+   that `@deepseek-ai/dsh` itself currently carries for `0.1.7-rc.1`
+   (`next` today). The `classify` job re-derives that mapping at publish
+   time, so nothing is hardcoded.
+2. **Release another host line** — check out that line's branch
+   (`release/0.1.5-rc.3`), bump the version there (`0.1.5-rc.3-v0.1`), and
+   either push the tag by hand or run the CI workflow with the `release`
+   input on that branch. The release job publishes under the tag that dsh
+   itself carries for that line — `latest` for `0.1.5-rc.3` — and the
+   `release-latest` job **waits in the `production` environment for a human
+   approval** before creating the GitHub Release and publishing.
+3. **Verify (human)** — install the pinned tag
+   (`dsh plugin --profile web add
+   "github:wenzetan/dsh-quota-panel#dsh-v0.1.5-rc.3-v0.1"`, or
+   `dsh-quota-panel@latest` / `@next` from npm) and test it for real.
 
 One-time setup:
 
