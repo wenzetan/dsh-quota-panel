@@ -548,6 +548,10 @@ DSH line      └─ local revision (this repo's counter)
 * Releases for a maintenance line are cut from that line's branch
   (`release/0.1.5-rc.3`) by pushing the tag by hand or dispatching the CI
   workflow with `release: true`; `main` only ever auto-tags its own line.
+* A human can override the mapping for a release they have confirmed:
+  dispatch the CI workflow with **`promote_tag`** (e.g. `v0.1.7-rc.1-v0.1`) to
+  move npm `latest` and the GitHub Latest flag to that release, even when its
+  host line is still dsh `next`.
 
 Because the host line is pinned in `peerDependencies`, one DSH line gets one
 plugin line: old host lines keep their old plugin release, and the plugin is
@@ -619,7 +623,11 @@ Workflow:
    itself carries for that line — `latest` for `0.1.5-rc.3` — and the
    `release-latest` job **waits in the `production` environment for a human
    approval** before creating the GitHub Release and publishing.
-3. **Verify (human)** — install the pinned tag
+3. **Promote (optional, human)** — once you have confirmed the newer line
+   works for real, dispatch the CI workflow with `promote_tag` set to its tag
+   (e.g. `v0.1.7-rc.1-v0.1`). The `promote` job moves npm `latest` and the
+   GitHub Latest flag there; it runs behind the `production` environment.
+4. **Verify (human)** — install the pinned tag
    (`dsh plugin --profile web add
    "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"`, or
    `dsh-quota-panel@latest` / `@next` from npm) and test it for real.

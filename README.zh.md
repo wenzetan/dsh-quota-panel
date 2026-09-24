@@ -439,6 +439,9 @@ DSH 线        └─ 本地修订号（本仓库自己的计数器）
   环境的审批人确认），其余走 pre-release。
 * 维护线的版本从该线自己的分支（`release/0.1.5-rc.3`）手工推 tag 或
   `workflow_dispatch` 时传 `release: true` 来发；`main` 只自动打自己这条线的 tag。
+* 人工已确认的版本可以覆盖上述映射：`workflow_dispatch` 时传 **`promote_tag`**
+  （如 `v0.1.7-rc.1-v0.1`），把 npm `latest` 与 GitHub Latest 标记移到该版本——
+  即使它的宿主线还是 dsh `next`。
 
 宿主线 pin 在 `peerDependencies` 里，所以一条 DSH 线对应一条插件线：旧宿主线保留
 它当年的插件版本，插件与 DSH 一起升级。
@@ -500,7 +503,10 @@ dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"
    并传 `release: true`。发布任务会按 dsh 自己给该线挂的 tag 发布——
    `0.1.5-rc.3` 是 `latest`——且 `release-latest` 任务**停在 `production`
    环境等待人工审批**后才创建 GitHub Release 并发布。
-3. **验证（人工）** —— 安装所锁定的 tag 实测
+3. **提升（可选，人工）** —— 确认新线实测没问题后，`workflow_dispatch` 传
+   `promote_tag`（如 `v0.1.7-rc.1-v0.1`）。`promote` 任务会移动 npm `latest`
+   与 GitHub Latest 标记，并停在 `production` 环境。
+4. **验证（人工）** —— 安装所锁定的 tag 实测
    （`dsh plugin --profile web add
    "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"`，或 npm 的
    `dsh-quota-panel@latest` / `@next`）。

@@ -42,6 +42,11 @@
 #         approval). A broken build can therefore never become what a bare
 #         install resolves to.
 #
+# promote: a maintainer-confirmed release can be moved to `latest` even when
+#         its host line is not dsh's own `latest` — dispatch with
+#         `promote_tag` (npm dist-tag add latest + GitHub release Latest,
+#         gated by the `production` environment).
+#
 # boot resolves the host line from package.json's exact `@deepseek-ai/dsh*`
 #         peers, so each line's release is gated against the dsh version it
 #         declares rather than a hardcoded one.
@@ -60,6 +65,10 @@ on:
         required: false
         type: boolean
         default: false
+      promote_tag:
+        description: 'Promote an already-published release to npm latest + GitHub Latest (e.g. v0.1.7-rc.1-v0.1). Leave empty unless promoting.'
+        required: false
+        type: string
 
 jobs:
   check:
@@ -591,3 +600,52 @@ jobs:
         run: npm publish dsh-quota-panel-*.tgz --access public --tag latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Maintainer promotion: the mirror rule picks the channel from dsh's own
+  # dist-tags, but a human who has confirmed a release can move it to the
+  # default install (`latest`) anyway. Dispatch with `promote_tag` set to the
+  # tag: this moves npm `latest` and flips the GitHub release to a normal,
+  # Latest release. The `production` environment is the confirmation gate.
+  promote:
+    if: github.event_name == 'workflow_dispatch' && inputs.promote_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment: production
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the promoted tag and its published version
+        id: check
+        env:
+          TAG: ${{ inputs.promote_tag }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "::error::promote_tag must look like v0.1.7-rc.1-v0.1, got '$TAG'"; exit 1 ;;
+          esac
+          VERSION="${TAG#v}"
+          if ! npm view "dsh-quota-panel@$VERSION" version > /dev/null 2>&1; then
+            echo "::error::dsh-quota-panel@$VERSION is not published on npm"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "promoting dsh-quota-panel@$VERSION (tag $TAG) to latest"
+      - name: Set up node with the npm registry (only when NPM_TOKEN is configured)
+        if: env.NPM_TOKEN != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Move the npm latest dist-tag (only when NPM_TOKEN is configured)
+        if: env.NPM_TOKEN != ''
+        run: npm dist-tag add "dsh-quota-panel@${{ steps.check.outputs.version }}" latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Mark the GitHub release as a normal, Latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.promote_tag }}
+        run: gh release edit "$TAG" --prerelease=false --latest
