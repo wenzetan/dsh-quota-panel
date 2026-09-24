@@ -505,7 +505,8 @@ dsh plugin --profile web add "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"
    环境等待人工审批**后才创建 GitHub Release 并发布。
 3. **提升（可选，人工）** —— 确认新线实测没问题后，`workflow_dispatch` 传
    `promote_tag`（如 `v0.1.7-rc.1-v0.1`）。`promote` 任务会移动 npm `latest`
-   与 GitHub Latest 标记，并停在 `production` 环境。
+   与 GitHub Latest 标记，并把其余普通 release 降级为 pre-release——保证**有且只有
+   一个普通 release**（即当前 `latest`）。该任务停在 `production` 环境。
 4. **验证（人工）** —— 安装所锁定的 tag 实测
    （`dsh plugin --profile web add
    "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"`，或 npm 的

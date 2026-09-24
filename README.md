@@ -626,7 +626,9 @@ Workflow:
 3. **Promote (optional, human)** — once you have confirmed the newer line
    works for real, dispatch the CI workflow with `promote_tag` set to its tag
    (e.g. `v0.1.7-rc.1-v0.1`). The `promote` job moves npm `latest` and the
-   GitHub Latest flag there; it runs behind the `production` environment.
+   GitHub Latest flag there, and demotes every other normal release to a
+   pre-release — so exactly one release (the current `latest`) is a normal
+   release. It runs behind the `production` environment.
 4. **Verify (human)** — install the pinned tag
    (`dsh plugin --profile web add
    "github:wenzetan/dsh-quota-panel#v0.1.5-rc.3-v0.1"`, or
